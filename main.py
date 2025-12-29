@@ -10,16 +10,16 @@ from perlin_noise import PerlinNoise
 SCREEN_WIDTH = 1000
 SCREEN_HEIGHT = 800
 SCREEN_TITLE = "D&D Arcade Prototype"
-TILE_SIZE = 100
+TILE_SIZE = 120
 GRID_WIDTH = 50
 GRID_HEIGHT = 50
-CAMERA_SPEED = 20
-ENEMY_MOVE_SPEED = 15  # Скорость анимации врагов (пикселей за кадр)
+CAMERA_SPEED = 25
 
 # Состояния хода
 PLAYER_TURN = 0
 ENEMY_CALCULATING = 1
 ENEMY_MOVING = 2
+PLAYER_MOVING = 3
 
 # Параметры по умолчанию
 EXTEND_PARAMS = {
@@ -27,10 +27,10 @@ EXTEND_PARAMS = {
     'moves_left': 'moves_count',
     'damage_deal': '0',
     'view_range': '4',
-    'move_range': '5'
+    'move_range': '4'
 }
 
-def bfs_path(start_grid, target_grid, grid_width, grid_height, obstacles=None):
+def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HEIGHT, obstacles=None):
     """ Поиск кратчайшего пути (BFS) """
     queue = deque([start_grid])
     came_from = {start_grid: None}
@@ -51,8 +51,8 @@ def bfs_path(start_grid, target_grid, grid_width, grid_height, obstacles=None):
             nx, ny = next_node
             # Проверка границ
             if 0 <= nx < grid_width and 0 <= ny < grid_height:
-                # Проверка препятствий (можно добавить проверку типов тайлов)
-                if next_node not in came_from:  # Можно добавить: and next_node not in obstacles
+                # Проверка препятствий (можно добавить проверку типов тайлов города для врагов)
+                if next_node not in came_from and next_node not in obstacles:
                     queue.append(next_node)
                     came_from[next_node] = current
 
@@ -78,10 +78,11 @@ class ResourceManager:
 
     @classmethod
     def load_resources(cls):
-        if cls.loaded: return
+        if cls.loaded:
+            return
         try:
             for i in range(51):
-                filename = f"images/start_menu_jump/start_menu_{i:03d}.jpg"
+                filename = f"images/start_menu/start_menu_{i:03d}.jpg"
                 cls.start_frames.append(arcade.load_texture(filename))
         except:
             pass
@@ -89,6 +90,12 @@ class ResourceManager:
             for i in range(51):
                 filename = f"images/lose_menu/lose_menu_{i:03d}.jpg"
                 cls.lose_frames.append(arcade.load_texture(filename))
+        except:
+            pass
+        try:
+            cls.start_music = arcade.load_sound('sound/Dota_2_-_Main_Menu_Flute_Theme_75018976.mp3')
+            cls.lose_music = arcade.load_sound('sound/Giulio-Fazio-Wandering-Knight_lose_misic.mp3')
+            cls.game_music = arcade.load_sound('sound/backgound_witcher.mp3')
         except:
             pass
         cls.loaded = True
@@ -131,6 +138,7 @@ class StartView(arcade.View):
         self.anim_timer = 0.0
 
     def on_show_view(self):
+        self.start_player = ResourceManager.start_music.play(loop=True, volume=0.7)
         arcade.set_background_color(arcade.color.BLACK)
 
     def on_update(self, delta_time):
@@ -151,6 +159,7 @@ class StartView(arcade.View):
                              anchor_x="center")
 
     def on_key_press(self, symbol, modifiers):
+        arcade.stop_sound(self.start_player)
         game_view = GameView()
         game_view.setup()
         self.window.show_view(game_view)
@@ -163,7 +172,9 @@ class GameOverView(arcade.View):
         self.current_frame = 0
         self.anim_timer = 0.0
 
+
     def on_show_view(self):
+        self.lose_player = ResourceManager.lose_music.play(loop=True, speed=0.75)
         arcade.set_background_color(arcade.color.BLACK)
 
     def on_update(self, delta_time):
@@ -183,6 +194,7 @@ class GameOverView(arcade.View):
             arcade.draw_text("GAME OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, arcade.color.RED, 50, anchor_x="center")
 
     def on_key_press(self, symbol, modifiers):
+        arcade.stop_sound(self.lose_player)
         self.window.show_view(StartView())
 
 
@@ -207,6 +219,9 @@ class GameView(arcade.View):
 
         arcade.set_background_color(arcade.color.BLACK)
 
+    def on_show_view(self):
+        self.background_music_player = ResourceManager.game_music.play(volume=0.4, loop=True)
+
     def setup(self):
         self.tile_list = arcade.SpriteList()
         self.entity_list = arcade.SpriteList()
@@ -218,7 +233,7 @@ class GameView(arcade.View):
         self.camera = arcade.camera.Camera2D()
         noise = PerlinNoise(octaves=4)
 
-        grid_types = [['meadow' for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
+        self.grid_types = [['meadow' for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
         tavern_locations = []
         valid_spawn_tiles = []
 
@@ -231,21 +246,21 @@ class GameView(arcade.View):
                     tile_type = "forest"
                 elif n > 0.275:
                     tile_type = "town"
-                grid_types[x][y] = tile_type
+                self.grid_types[x][y] = tile_type
 
         # Размещение объектов
         for x in range(GRID_WIDTH):
             for y in range(GRID_HEIGHT):
-                tile_type = grid_types[x][y]
+                tile_type = self.grid_types[x][y]
                 if tile_type == "town":
-                    count = 0
-                    for dx in range(-2, 3):
-                        for dy in range(-2, 3):
+                    valid = True
+                    for dx in range(-1, 2):
+                        for dy in range(-1, 2):
                             nx, ny = x + dx, y + dy
-                            if 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT:
-                                count += 1
-                    if count >= 10:
-                        too_close = any(math.sqrt((x - tx) ** 2 + (y - ty) ** 2) < 20 for tx, ty in tavern_locations)
+                            if not (1 < nx < GRID_WIDTH and 1 < ny < GRID_HEIGHT) or self.grid_types[nx][ny] != 'town':
+                                valid = False
+                    if valid:
+                        too_close = any(math.sqrt((x - tx) ** 2 + (y - ty) ** 2) < 17 for tx, ty in tavern_locations)
                         if not too_close:
                             tile_type = "bar"
                             print(tavern_locations)
@@ -296,12 +311,19 @@ class GameView(arcade.View):
         if not valid_spawn_tiles:
             valid_spawn_tiles.append(self.tile_list[len(self.tile_list) // 2])
         spawn_point = random.choice(valid_spawn_tiles)
+        positions = [
+            (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
+            (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
+            (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] + TILE_SIZE),
+            (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] + TILE_SIZE)
+        ]
 
-        hero_stats = {'max_hp': 30, 'moves_count': 30}
-        for _ in range(3):
-            hero = Entity("images/hero.jpg", "hero", hero_stats.copy())
-            hero.color = arcade.color.BLUE_GRAY
-            hero.position = spawn_point.position
+        hero_stats = [{'max_hp': 20, 'moves_count': 4},
+                      {'max_hp': 35, 'moves_count': 3},
+                      {'max_hp': 15, 'moves_count': 5}]
+        for i in range(3):
+            hero = Entity(f"images/hero_{i + 1}.jpg", "hero", hero_stats[i])
+            hero.position = positions[i]
             self.entity_list.append(hero)
             self.heroes_list.append(hero)
 
@@ -321,8 +343,7 @@ class GameView(arcade.View):
             ly = random.randint(2, GRID_HEIGHT - 3)
 
             # 1. Далеко от спавна
-            if math.sqrt((lx - spawn_gx) ** 2 + (ly - spawn_gy) ** 2) < 15:
-                continue
+            if math.sqrt((lx - spawn_gx) ** 2 + (ly - spawn_gy) ** 2) < 15: continue
 
             # 2. Далеко от других логов
             too_close_lair = False
@@ -342,9 +363,10 @@ class GameView(arcade.View):
                 print(f"Логово {created_lairs} создано.")
 
     def spawn_enemy(self, x_grid, y_grid, is_guardian=False):
-        enemy_stats = {'max_hp': 15}
-        enemy = Entity("images/hero.jpg", "enemy", enemy_stats)
-        enemy.color = arcade.color.RED if not is_guardian else arcade.color.PURPLE
+        if is_guardian:
+            enemy = Entity('images/guardian.jpg', 'enemy', {'max_hp': 25})
+        else:
+            enemy = Entity("images/enemy.jpg", "enemy", {'max_hp': 15})
         enemy.is_guardian = is_guardian
         enemy.center_x = x_grid * TILE_SIZE + TILE_SIZE / 2
         enemy.center_y = y_grid * TILE_SIZE + TILE_SIZE / 2
@@ -359,6 +381,7 @@ class GameView(arcade.View):
             return
 
         if len(self.heroes_list) == 0:
+            arcade.stop_sound(self.background_music_player)
             self.window.show_view(GameOverView())
             return
 
@@ -519,7 +542,7 @@ class GameView(arcade.View):
         # Строим карту препятствий (другие враги - препятствия)
         # Для простоты пока игнорируем динамические препятствия при поиске пути,
         # иначе они могут заблокировать друг друга в узких проходах.
-
+        obstacles = set()
         for enemy in self.enemy_list:
             # 1. Найти ближайшего героя
             closest_hero = None
@@ -541,11 +564,12 @@ class GameView(arcade.View):
                 target_gx = int(closest_hero.center_x // TILE_SIZE)
                 target_gy = int(closest_hero.center_y // TILE_SIZE)
 
-                path = bfs_path((e_gx, e_gy), (target_gx, target_gy), GRID_WIDTH, GRID_HEIGHT)
+                path = bfs_path((e_gx, e_gy), (target_gx, target_gy), obstacles=obstacles)
 
                 # 3. Атака или Движение
                 if len(path) <= enemy.get_stat('move_range'):
                     self.apply_ability(enemy, closest_hero)
+                    steps = [enemy.position]
                 else:
                     # Движение
                     move_limit = enemy.get_stat('move_range')
@@ -559,6 +583,7 @@ class GameView(arcade.View):
                         world_x = sx * TILE_SIZE + TILE_SIZE / 2
                         world_y = sy * TILE_SIZE + TILE_SIZE / 2
                         enemy.path_queue.append((world_x, world_y))
+                obstacles.add(steps[-1]) # там будет находиться враг
 
         # Переходим в фазу движения
         self.turn_state = ENEMY_MOVING
@@ -606,7 +631,7 @@ class GameView(arcade.View):
         wx, wy = world_point[0], world_point[1]
 
         active_hero = self.heroes_list[self.current_unit_index] if self.heroes_list else None
-        if not active_hero:
+        if not active_hero or active_hero.path_queue:
             return
         clicked = arcade.get_sprites_at_point((wx, wy), self.entity_list)
 
@@ -633,8 +658,11 @@ class GameView(arcade.View):
                 dist = abs(end_gx - start_gx) + abs(end_gy - start_gy)
 
                 if active_hero['moves_left'] > 0 and dist <= active_hero.get_stat('move_range'):
-                    # добавлю и сюда анимацию, но пока мгновенно
-                    active_hero.position = tile.position
+                    path = bfs_path((start_gx, start_gy), (end_gx, end_gy))
+                    for sx, sy in path:
+                        world_x = sx * TILE_SIZE + TILE_SIZE / 2
+                        world_y = sy * TILE_SIZE + TILE_SIZE / 2
+                        active_hero.path_queue.append((world_x, world_y))
                     active_hero['moves_left'] -= 1
 
         if all(u['moves_left'] <= 0 for u in self.heroes_list):

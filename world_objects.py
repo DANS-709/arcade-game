@@ -17,7 +17,9 @@ EXTEND_PARAMS = {
 
 class Entity(arcade.Sprite):
     def __init__(self, filename, role, stats_dict):
-        super().__init__(filename, scale=1)
+        super().__init__(filename)
+        self.width = 100
+        self.height = 120
         self.role = role
         self.stats_dict = stats_dict
         self.set_full_stats()
@@ -60,6 +62,7 @@ class Entity(arcade.Sprite):
         self.active_effects.append({
             'stat': stat, 'value': value, 'duration': duration
         })
+
 
     def update_effects_turn(self):
         surviving_effects = []
