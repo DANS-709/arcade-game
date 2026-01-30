@@ -30,29 +30,34 @@ EXTEND_PARAMS = {
     'damage_deal': '0',
     'view_range': '4',
     'move_range': '4',
+    'attack_range': '3',
     'armor': '0',      # Плоская защита (вычитается из урона)
     'defense': '0'     # Процентная защита (снижает урон на %)
 }
 
-SAMPLE_HERO_JSON = {
-    "name": "Vovan",
-    "race": "hero['view_range'] += 1; hero['mana'] = 200; hero['moves_count'] = 10",
-    "class": "buff(hero, 'hp', 10, 5); hero['armor'] = 2",
+GUARD_JSON = {
+    "name": "guard",
+    "race": ["ancient","hero['moves_range'] = 6"],
+    "class": ["protector", "buff(hero, 'hp', 10, 5); hero['armor'] = 2"],
     "stats": {"dex": 2, "str": 1, "int": 6, "cha": 7},
     "level": 1,
     "hp": 30,
     "abilities": [
-        {"name": "Воодушевляющий пинок", "target": "enemy", "effect": "target['hp'] -= 5; buff(hero, 'hp', 2, 2)", "description": "Сильно пинает врага."}
+        {"name": "обычный удар", "effect": "target['hp'] -= 3; buff(hero, 'hp', 1, 2)",
+         "description": "Наносит урон врагу, получая небольшой бафф."},
+        {"name": "Удар с воздуха",
+         "effect": "buff(target, 'max_hp', -3, 2);target['hp'] -= 7;hero['hp'] -= 5; buff(hero, 'hp', -2, 1)",
+         "description": "взлетает вверх, после чего падает на противника"}
     ],
     "image_b64": ""  # Пусто, загрузится дефолтная
 }
-SAMPLE_ENEMY_JSON = {"name": "spooky scary sceleton",
-    "race": "hero['move_range'] += 1",
-    "class": "buff(hero, 'hp', -5, 2)",
+ENEMY_JSON = {"name": "spooky scary sceleton",
+    "race": ["sceleton","buff(hero, 'move_range', -1, 2)"],
+    "class": ["warrior","buff(hero, 'hp', -5, 2)"],
     "stats": {"dex": 2, "str": 1, "int": 2, "cha": -3},
     "level": 1,
     "hp": 15,
     "abilities": [
-        {"name": "Пинок", "target": "enemy", "effect": "target['hp'] -= 3", "description": "Сильно пинает врага."}
+        {"name": "удар мечом", "effect": "target['hp'] -= 3", "description": "Наносит рубящий удар мечом по врагу."}
     ],
     "image_b64": "" } # Пусто, загрузится дефолтная}

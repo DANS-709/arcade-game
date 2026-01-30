@@ -21,7 +21,6 @@ class CharacterInfoOverlay:
 
         self.window = arcade.get_window()
 
-        # Кешируем фон и список элементов
         self.background_texture = arcade.load_texture('images/info_panel.jpg')
         self.ui_elements = []  # Здесь будем хранить объекты arcade.Text
         self.sprite_list = arcade.SpriteList()  # Для превью
@@ -115,7 +114,7 @@ class CharacterInfoOverlay:
                         self.entity.selected_ability = eff
                         print(f"Selected: {eff}")
 
-                    # Сохраняем начальную Y позицию в самом объекте кнопки для скролла
+                    # Сохраняем начальную Y
                     btn.base_y = btn.center_y
 
                     self.manager.add(btn)

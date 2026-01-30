@@ -1,6 +1,8 @@
 from collections import deque
 import random
 from constants import *
+import zipfile
+import json
 
 
 def apply_ability(source, target, effect):
@@ -22,8 +24,10 @@ def apply_ability(source, target, effect):
     try:
         for cmd in effect_script.split(';'):
             if cmd.strip(): exec(cmd.strip(), {}, context)
-    except:
-        pass
+    except Exception as e:
+        print(f"Ошибка применения эффекта: {e}")
+
+        source['moves_left'] += 1
 
     for key in target.stats_dict.keys():
         target.stats_dict[key] = context['target'][key] - target.get_stat(key)[1]
@@ -55,7 +59,7 @@ def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HE
             nx, ny = next_node
             # Проверка границ
             if 0 <= nx < grid_width and 0 <= ny < grid_height:
-                # Проверка препятствий (можно добавить проверку типов тайлов города для врагов)
+                # Проверка препятствий
                 if next_node not in came_from and next_node not in obstacles:
                     queue.append(next_node)
                     came_from[next_node] = current
@@ -71,3 +75,41 @@ def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HE
         curr = came_from[curr]
     path.reverse()
     return path
+
+
+
+from tkinter import filedialog  # для выбора файла
+import tkinter as tk
+
+
+def load_characters_from_zip():
+    # Создаем окно для выбора файла
+    root = tk.Tk()
+    root.withdraw()  # Скрываем основное окно
+
+    # Открываем диалоговое окно выбора файла
+    file_path = filedialog.askopenfilename(
+        filetypes=[("ZIP files", "*.zip")]
+    )
+
+    if not file_path:
+        return None
+
+    characters = []
+
+    try:
+        # Открываем выбранный zip-архив
+        with zipfile.ZipFile(file_path, 'r') as zip_file:
+            # Получаем список всех JSON-файлов в архиве
+            json_files = [name for name in zip_file.namelist() if name.endswith('.json')]
+            # Загружаем данные каждого персонажа
+            for file_name in json_files[:4]:  # Ограничиваем количество героев
+                with zip_file.open(file_name) as file:
+                    data = json.load(file)
+                    characters.append(data)
+
+    except Exception as e:
+        print(f"Ошибка при загрузке данных: {str(e)}")
+        return None
+
+    return characters

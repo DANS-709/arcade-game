@@ -7,12 +7,12 @@ import time
 from perlin_noise import PerlinNoise
 from constants import *
 from entities import Entity, Lair
-from game_logic import bfs_path, apply_ability
+from game_logic import bfs_path, apply_ability, load_characters_from_zip
 from ui import CharacterInfoOverlay
+import database
 
 
 class ResourceManager:
-    """ Класс для предварительной загрузки ресурсов """
     start_frames = []
     lose_frames = []
     loaded = False
@@ -26,20 +26,20 @@ class ResourceManager:
                 filename = f"images/start_menu/start_menu_{i:03d}.jpg"
                 cls.start_frames.append(arcade.load_texture(filename))
         except:
-            print('Произошла ошибка при загрузке фона')
+            pass
         try:
             for i in range(51):
                 filename = f"images/lose_menu/lose_menu_{i:03d}.jpg"
                 cls.lose_frames.append(arcade.load_texture(filename))
         except:
-            print('Произошла ошибка при загрузке фона')
+            pass
+        # Загрузка звуков (заглушки при ошибке)
         try:
             cls.start_music = arcade.load_sound('sound/Dota_2_-_Main_Menu_Flute_Theme_75018976.mp3')
             cls.lose_music = arcade.load_sound('sound/Giulio-Fazio-Wandering-Knight_lose_misic.mp3')
             cls.game_music = arcade.load_sound('sound/backgound_witcher.mp3')
             cls.bar_music = arcade.load_sound('sound/tavern_witcher.mp3')
         except:
-            print('Произошла ошибка при загрузке звуков')
             cls.start_music = arcade.load_sound(':resources:/music/1918.mp3')
             cls.lose_music = arcade.load_sound(':resources:/music/1918.mp3')
             cls.game_music = arcade.load_sound(':resources:/music/1918.mp3')
@@ -48,11 +48,8 @@ class ResourceManager:
             cls.button = arcade.load_texture('images/button.png')
             cls.hover_button = arcade.load_texture('images/hover_button.png')
         except:
-            print('Произошла ошибка при загрузке текстур')
             cls.button = arcade.load_texture(':resources:/gui_basic_assets/button/red_normal.png')
             cls.hover_button = arcade.load_texture(':resources:/gui_basic_assets/button/red_hover.png')
-
-
         cls.loaded = True
 
 
@@ -67,6 +64,7 @@ class LoadingView(arcade.View):
 
     def on_show_view(self):
         arcade.set_background_color(arcade.color.BLACK)
+        database.init_db()  # Инициализация БД при запуске
 
     def on_draw(self):
         self.clear()
@@ -96,12 +94,27 @@ class StartView(arcade.View):
         self.manager.add(self.anchor_layout)
         self.setup_widgets()
 
+    def on_click_continue(self, event):
+        # Попытка загрузить игру
+        data = database.load_game_state()
+        if data:
+            self.manager.disable()
+            game_view = GameView()
+            game_view.setup(load_data=data)
+            arcade.stop_sound(self.start_player)
+            self.window.show_view(game_view)
+        else:
+            print("Нет сохранений!")
+
     def on_click_new_game(self, event):
         self.manager.disable()
         game_view = GameView()
-        game_view.setup()
-        arcade.stop_sound(self.start_player)
-        self.window.show_view(game_view)
+        game_view.setup(load_data=None)  # Новая игра
+        if game_view.success:
+            arcade.stop_sound(self.start_player)
+            self.window.show_view(game_view)
+        else:
+            self.manager.enable()
 
     def on_click_quit(self, event):
         arcade.exit()
@@ -120,92 +133,37 @@ class StartView(arcade.View):
     def on_draw(self):
         self.clear()
         self.view_camera.use()
-
         if ResourceManager.start_frames:
             texture = ResourceManager.start_frames[self.current_frame]
             arcade.draw_texture_rect(texture, arcade.rect.LBWH(0, 0, self.width, self.height))
         else:
-            arcade.draw_text("МЕНЮ: Нажмите любую клавишу", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, arcade.color.WHITE, 30,
-                             anchor_x="center")
+            arcade.draw_text("МЕНЮ", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, arcade.color.WHITE, 30, anchor_x="center")
         self.manager.draw()
 
     def setup_widgets(self):
-        # VBox для кнопок
         self.v_box = arcade.gui.UIBoxLayout()
-
-        # Стиль кнопок
-        style = {
-            "normal": {
-                "font_name": ("Arial",),
-                "font_size": 20,
-                "font_color": arcade.color.BRONZE,
-            },
-            "hover": {
-                "font_name": ("Arial",),
-                "font_size": 20,
-                "font_color": arcade.color.BUFF,
-                "border_width": 2,
-                "border_color": arcade.color.GRAY,
-                "bg_color": arcade.color.DARK_GRAY,
-            },
-            "press": {
-                "font_name": ("Arial",),
-                "font_size": 20,
-                "font_color": arcade.color.BUFF,
-                "border_width": 2,
-                "border_color": arcade.color.GRAY,
-                "bg_color": arcade.color.BLACK,
-            }
-        }
         button_style = {
-            "normal": {
-                "font_name": ("Times New Roman", "Arial"),
-                "font_size": 18,
-                "font_color": arcade.color.LIME_GREEN,
-            },
-            "hover": {
-                "font_name": ("Times New Roman", "Arial"),
-                "font_size": 18,
-                "font_color": arcade.color.MALACHITE,
-            },
-            "press": {
-                "font_name": ("Times New Roman", "Arial"),
-                "font_size": 18,
-                "font_color": arcade.color.MALACHITE,
-            }
+            "normal": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.LIME_GREEN},
+            "hover": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.MALACHITE},
+            "press": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.MALACHITE}
         }
-        # Кнопка "Продолжить" (пока = Новая игра)
-        continue_btn = arcade.gui.UITextureButton(text="Продолжить", width=225,
-                                                  texture=ResourceManager.button,
-                                                  texture_hovered=ResourceManager.hover_button,
-                                                  style=button_style)
-        self.v_box.add(continue_btn)
-        continue_btn.on_click = self.on_click_new_game
 
-        # Кнопка "Новая игра"
-        new_game_btn = arcade.gui.UITextureButton(text="Новая Игра", width=225,
-                                                  texture=ResourceManager.button,
-                                                  texture_hovered=ResourceManager.hover_button,
-                                                  texture_pressed=ResourceManager.hover_button,
-                                                  style=button_style)
+        continue_btn = arcade.gui.UITextureButton(text="Продолжить", width=225, texture=ResourceManager.button,
+                                                  texture_hovered=ResourceManager.hover_button, style=button_style)
+        self.v_box.add(continue_btn)
+        continue_btn.on_click = self.on_click_continue
+
+        new_game_btn = arcade.gui.UITextureButton(text="Новая Игра", width=225, texture=ResourceManager.button,
+                                                  texture_hovered=ResourceManager.hover_button, style=button_style)
         self.v_box.add(new_game_btn)
         new_game_btn.on_click = self.on_click_new_game
 
-        # Кнопка "Выход"
-        quit_btn = arcade.gui.UITextureButton(text="Выход", width=225,
-                                                  texture=ResourceManager.button,
-                                                  texture_hovered=ResourceManager.hover_button,
-                                                  texture_pressed=ResourceManager.hover_button,
-                                                  style=button_style)
+        quit_btn = arcade.gui.UITextureButton(text="Выход", width=225, texture=ResourceManager.button,
+                                              texture_hovered=ResourceManager.hover_button, style=button_style)
         self.v_box.add(quit_btn)
         quit_btn.on_click = self.on_click_quit
-        self.anchor_layout.add(
-            anchor_x="left",
-            anchor_y="center_y",
-            align_x=55,
-            align_y=-50,
-            child=self.v_box
-        )
+
+        self.anchor_layout.add(anchor_x="left", anchor_y="center_y", align_x=55, align_y=-50, child=self.v_box)
 
 
 class GameOverView(arcade.View):
@@ -332,32 +290,29 @@ class BarView(arcade.View):
             self.player_sprite.change_x = 0
 
 
-
 class GameView(arcade.View):
     def __init__(self):
         super().__init__()
+        self.map_seed = None  # Для сохранения
         self.tile_list = None
         self.entity_list = None
         self.fog_list = None
         self.enemy_list = None
         self.heroes_list = None
-        self.lairs_list = []  # Список всех логов
-
+        self.lairs_list = []
         self.camera = None
         self.camera_vel = [0, 0]
         self.camera_mode = "FOLLOW"
         self.current_unit_index = 0
         self.selected_unit = None
-
         self.turn_state = PLAYER_TURN
         self.pending_buffs = []
-
         arcade.set_background_color(arcade.color.BLACK)
 
     def on_show_view(self):
         self.background_music_player = ResourceManager.game_music.play(volume=0.4, loop=True)
 
-    def setup(self):
+    def setup(self, load_data=None):
         self.tile_list = arcade.SpriteList()
         self.entity_list = arcade.SpriteList()
         self.enemy_list = arcade.SpriteList()
@@ -366,15 +321,21 @@ class GameView(arcade.View):
         self.ui_camera = arcade.camera.Camera2D()
         self.char_info_overlay = CharacterInfoOverlay()
         self.lairs_list = []
-
         self.camera = arcade.camera.Camera2D()
-        noise = PerlinNoise(octaves=4)
+
+        # 1. Генерация карты (из сохранения или новая)
+        if load_data:
+            self.map_seed = load_data['seed']
+            random.seed(self.map_seed)  # Восстанавливаем рандом для карты
+        else:
+            self.map_seed = random.randint(1, 100000)
+            random.seed(self.map_seed)
+
+        noise = PerlinNoise(octaves=4, seed=self.map_seed)
 
         self.grid_types = [['meadow' for _ in range(GRID_HEIGHT)] for _ in range(GRID_WIDTH)]
         tavern_locations = []
         valid_spawn_tiles = []
-
-        # Генерация карты
         for x in range(GRID_WIDTH):
             for y in range(GRID_HEIGHT):
                 n = noise([x / GRID_WIDTH, y / GRID_HEIGHT])
@@ -385,7 +346,6 @@ class GameView(arcade.View):
                     tile_type = "town"
                 self.grid_types[x][y] = tile_type
 
-        # Размещение объектов
         for x in range(GRID_WIDTH):
             for y in range(GRID_HEIGHT):
                 tile_type = self.grid_types[x][y]
@@ -400,7 +360,6 @@ class GameView(arcade.View):
                         too_close = any(math.sqrt((x - tx) ** 2 + (y - ty) ** 2) < 17 for tx, ty in tavern_locations)
                         if not too_close:
                             tile_type = "bar"
-                            print(tavern_locations)
                             tavern_locations.append((x, y))
 
                 img_file = "images/meadow2.jpg"
@@ -429,9 +388,7 @@ class GameView(arcade.View):
                 tile.center_y = y * TILE_SIZE + TILE_SIZE / 2
                 tile.properties = {'type': tile_type, 'grid_x': x, 'grid_y': y}
                 self.tile_list.append(tile)
-
-                if tile_type == "bar":
-                    valid_spawn_tiles.append(tile)
+                if tile_type == "bar": valid_spawn_tiles.append(tile)
 
                 try:
                     fog = arcade.Sprite("images/_fog.png")
@@ -444,244 +401,123 @@ class GameView(arcade.View):
                 fog.alpha = 255
                 self.fog_list.append(fog)
 
-        # Герои
-        if not valid_spawn_tiles:
-            valid_spawn_tiles.append(self.tile_list[len(self.tile_list) // 2])
-        spawn_point = random.choice(valid_spawn_tiles)
-        positions = [
-            (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
-            (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
-            (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] + TILE_SIZE),
-            (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] + TILE_SIZE)
-        ]
+        # 2. Загрузка сущностей
+        if load_data:
+            # Восстанавливаем сущности из БД
+            for ent_data in load_data['entities']:
+                if ent_data['role'] == 'hero':
+                    hero = Entity(ent_data['image_path'], "hero", stats_dict=ent_data['stats'])
+                    hero.active_effects = ent_data['effects']
+                    hero.abilities = ent_data['abilities']
+                    hero.center_x, hero.center_y = ent_data['x'], ent_data['y']
+                    self.entity_list.append(hero)
+                    self.heroes_list.append(hero)
+                else:
+                    is_guardian = ent_data['is_guardian']
+                    enemy = Entity(ent_data['image_path'], "enemy", stats_dict=ent_data['stats'])
+                    enemy.active_effects = ent_data['effects']
+                    enemy.abilities = ent_data['abilities']
+                    enemy.is_guardian = is_guardian
+                    enemy.center_x, enemy.center_y = ent_data['x'], ent_data['y']
+                    self.entity_list.append(enemy)
+                    self.enemy_list.append(enemy)
 
-        hero_stats = [{'max_hp': 20, 'moves_count': 4},
-                      {'max_hp': 35, 'moves_count': 3},
-                      {'max_hp': 15, 'moves_count': 5}]
-        for i in range(3):
-            hero = Entity(f"images/hero_{i + 1}.jpg", "hero", json_data=SAMPLE_HERO_JSON.copy())
-            hero.position = positions[i]
-            self.entity_list.append(hero)
-            self.heroes_list.append(hero)
+            # Восстанавливаем логова
+            for l_data in load_data['lairs']:
+                lair = Lair((l_data['x'], l_data['y']))
+                lair.center_x, lair.center_y = l_data['x'], l_data['y']
+                lair.guardians_needed = l_data['guardians_needed']
+                lair.next_spawn_interval = l_data['next_spawn_interval']
+                lair.guardians_spawned = l_data['guardians_spawned']
+                self.lairs_list.append(lair)
+                self.tile_list.append(lair)
+
+        else:
+            # Новая игра
+            if not valid_spawn_tiles: valid_spawn_tiles.append(self.tile_list[0])
+            spawn_point = random.choice(valid_spawn_tiles)
+            heroes = load_characters_from_zip()
+            if not heroes:
+                self.success = False
+                return
+            self.success = True
+            positions = [
+                (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
+                (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
+                (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] + TILE_SIZE),
+                (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] + TILE_SIZE)
+            ]
+
+            # Создаем героев
+            for i in range(len(heroes)):
+                hero = Entity(f"images/hero_{i + 1}.jpg", "hero", json_data=heroes[i])
+                hero.position = positions[i]
+                self.entity_list.append(hero)
+                self.heroes_list.append(hero)
+
+            # создаем логова
+            spawn_gx = spawn_point.properties['grid_x']
+            spawn_gy = spawn_point.properties['grid_y']
+            created_lairs = 0
+            attempts = 0
+            while created_lairs < 3 and attempts < 1000:
+                attempts += 1
+                lx = random.randint(2, GRID_WIDTH - 3)
+                ly = random.randint(2, GRID_HEIGHT - 3)
+                if math.sqrt((lx - spawn_gx) ** 2 + (ly - spawn_gy) ** 2) < 15:
+                    continue
+
+                too_close = False
+                for l in self.lairs_list:
+                    if math.sqrt((lx - l.center_x / TILE_SIZE) ** 2 + (ly - l.center_y / TILE_SIZE) ** 2) < 10:
+                        too_close = True
+                        break
+                if not too_close:
+                    l_pos = (lx * TILE_SIZE + TILE_SIZE / 2, ly * TILE_SIZE + TILE_SIZE / 2)
+                    lair = Lair(l_pos)
+                    self.lairs_list.append(lair)
+                    self.tile_list.append(lair)
+                    created_lairs += 1
 
         self.selected_unit = self.heroes_list[0]
         self.camera.position = self.selected_unit.position
 
-        # Генерация 3 логов
-        spawn_gx = spawn_point.properties['grid_x']
-        spawn_gy = spawn_point.properties['grid_y']
-
-        created_lairs = 0
-        attempts = 0
-
-        while created_lairs < 3 and attempts < 1000:
-            attempts += 1
-            lx = random.randint(2, GRID_WIDTH - 3)
-            ly = random.randint(2, GRID_HEIGHT - 3)
-
-            # 1. Далеко от спавна
-            if math.sqrt((lx - spawn_gx) ** 2 + (ly - spawn_gy) ** 2) < 15: continue
-
-            # 2. Далеко от других логов
-            too_close_lair = False
-            for existing_lair in self.lairs_list:
-                ex = existing_lair.center_x // TILE_SIZE
-                ey = existing_lair.center_y // TILE_SIZE
-                if math.sqrt((lx - ex) ** 2 + (ly - ey) ** 2) < 10:
-                    too_close_lair = True
-                    break
-
-            if not too_close_lair:
-                l_pos = (lx * TILE_SIZE + TILE_SIZE / 2, ly * TILE_SIZE + TILE_SIZE / 2)
-                lair = Lair(l_pos)
-                self.lairs_list.append(lair)
-                self.tile_list.append(lair)
-                created_lairs += 1
-                print(f"Логово {created_lairs} создано.")
-
-    def spawn_enemy(self, x_grid, y_grid, is_guardian=False):
-        if is_guardian:
-            enemy = Entity('images/guardian.jpg', 'enemy', json_data=SAMPLE_HERO_JSON.copy())
-        else:
-            enemy = Entity("images/enemy.jpg", "enemy", json_data=SAMPLE_ENEMY_JSON.copy())
-        enemy.is_guardian = is_guardian
-        enemy.center_x = x_grid * TILE_SIZE + TILE_SIZE / 2
-        enemy.center_y = y_grid * TILE_SIZE + TILE_SIZE / 2
-        self.entity_list.append(enemy)
-        self.enemy_list.append(enemy)
-
-    def on_update(self, delta_time):
-        # 0. Условие ПОБЕДЫ (Все логова уничтожены)
-        if len(self.lairs_list) == 0:
-            print("ПОБЕДА!")
-            self.window.show_view(StartView())
-            return
-
-        elif len(self.heroes_list) == 0:
-            arcade.stop_sound(self.background_music_player)
-            self.window.show_view(GameOverView())
-            return
-        if self.char_info_overlay.visible:
-            self.char_info_overlay.update(delta_time)
-        # 1. Логика Ходов и Движения Врагов
-        if self.turn_state == ENEMY_CALCULATING:
-            self.enemy_turn_logic()
-
-        elif self.turn_state == ENEMY_MOVING:
-            any_moving = False
-            for enemy in self.enemy_list:
-                enemy.update_position()
-                if enemy.is_moving:
-                    any_moving = True
-
-            if not any_moving:
-                # Все враги дошли
-                self.turn_state = PLAYER_TURN
-                # Возвращаем ОД игрокам
-                for unit in self.heroes_list:
-                    unit['moves_left'] = unit['moves_count']
-                print("Ход игрока!")
-
-        # 2. Обновление анимации движения героев
-        for hero in self.heroes_list:
-            hero.update_position()
-
-        # 3. Логика Камеры (Строгие границы)
-        map_w = GRID_WIDTH * TILE_SIZE
-        map_h = GRID_HEIGHT * TILE_SIZE
-
-        half_view_w = (SCREEN_WIDTH / 2)
-        half_view_h = (SCREEN_HEIGHT / 2)
-
-        # Вычисляем желаемую позицию
-        new_cam_x, new_cam_y = self.camera.position
-
-        if self.camera_vel[0] != 0 or self.camera_vel[1] != 0:
-            self.camera_mode = "FREE"
-            new_cam_x += self.camera_vel[0] * CAMERA_SPEED
-            new_cam_y += self.camera_vel[1] * CAMERA_SPEED
-        elif self.camera_mode == "FOLLOW" and self.selected_unit:
-            new_cam_x, new_cam_y = arcade.math.lerp_2d(self.camera.position, self.selected_unit.position, 0.1)
-
-        # Центр камеры не может быть ближе к краю, чем половина экрана
-        new_cam_x = max(half_view_w, min(new_cam_x, map_w - half_view_w))
-        new_cam_y = max(half_view_h, min(new_cam_y, map_h - half_view_h))
-
-        self.camera.position = (new_cam_x, new_cam_y)
-
-        # 4. Туман
-        if self.heroes_list:
-            if self.turn_state == PLAYER_TURN:
-                self.current_unit_index = self.current_unit_index % len(self.heroes_list)
-                active_unit = self.heroes_list[self.current_unit_index]
-                self.selected_unit = active_unit
-            else:
-                # Во время хода врага показываем то, где камера
-                pass
-
-            # Рассеиваем туман вокруг всех героев
-            for hero in self.heroes_list:
-                view_dist = hero.get_stat('view_range')[0] * TILE_SIZE
-                for fog in self.fog_list:
-                    if not fog.visible:
-                        continue
-                    d = math.sqrt((fog.center_x - hero.center_x) ** 2 + (fog.center_y - hero.center_y) ** 2)
-                    if d <= view_dist:
-                        fog.alpha = max(0, fog.alpha - 15)
-                        if fog.alpha == 0:
-                            fog.visible = False
-
-        # 5. Логика Логов
-        for lair in self.lairs_list:
-            # Дистанция до ближайшего героя
-            min_dist = float('inf')
-            for hero in self.heroes_list:
-                d = math.sqrt((hero.center_x - lair.center_x) ** 2 + (hero.center_y - lair.center_y) ** 2)
-                if d < min_dist:
-                    min_dist = d
-
-            # Спавн стражей
-            if (min_dist / TILE_SIZE) < 5 and not lair.guardians_spawned:
-                lair.guardians_spawned = True
-                print("Стражи призваны!")
-                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
-                count = 0
-                for dx in range(-2, 3):
-                    for dy in range(-2, 3):
-                        if count >= 6: break
-                        if dx == 0 and dy == 0: continue
-                        self.spawn_enemy(lx + dx, ly + dy, is_guardian=True)
-                        count += 1
-
-            # Бродячие монстры
-            if time.time() - lair.last_spawn_time > lair.next_spawn_interval:
-                lair.last_spawn_time = time.time()
-                lair.next_spawn_interval = random.randint(40, 90)
-                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
-                for _ in range(3):
-                    self.spawn_enemy(lx + random.randint(-2, 2), ly + random.randint(-2, 2))
-
-            # Уничтожение логова
-            if lair.guardians_needed <= 0:
-                print("Одно из логов уничтожено!")
-                lair.kill()
-                self.lairs_list.remove(lair)
-
-        # 6. Смерть
-        for entity in self.entity_list:
-            if entity.get_stat('hp')[0] <= 0:
-                if getattr(entity, 'is_guardian', False):
-                    # Ищем к какому логову относился этот страж (по расстоянию)
-                    nearest_lair = None
-                    min_l_dist = float('inf')
-                    for l in self.lairs_list:
-                        dist = math.sqrt((entity.center_x - l.center_x) ** 2 + (entity.center_y - l.center_y) ** 2)
-                        if dist < min_l_dist:
-                            min_l_dist = dist
-                            nearest_lair = l
-
-                    if nearest_lair and min_l_dist < TILE_SIZE * 10:
-                        nearest_lair.guardians_needed -= 1
-                        print(f"Осталось стражей логова: {nearest_lair.guardians_needed}")
-
-                entity.kill()
-                if entity in self.heroes_list:
-                    self.heroes_list.remove(entity)
-                if entity in self.enemy_list:
-                    self.enemy_list.remove(entity)
-            elif entity.get_stat('hp')[-1] > entity.get_stat('max_hp')[0]:
-                entity['hp'] = entity.get_stat('max_hp')[0] + entity.get_stat('hp')[1]
-
-    def on_draw(self):
-        self.clear()
-        if self.camera:
-            self.camera.use()
-        self.tile_list.draw()
-        self.entity_list.draw()
-        for lair in self.lairs_list:
-            arcade.draw_text(f"{lair.guardians_needed}", lair.center_x, lair.center_y + 50, arcade.color.RED, 14,
-                             anchor_x="center")
-        self.fog_list.draw()
-        self.ui_camera.use()
-        self.char_info_overlay.draw()
 
     def enemy_turn_logic(self):
         print("Враги думают...")
 
-        # Строим карту препятствий (другие враги - препятствия)
-        # Для простоты пока игнорируем динамические препятствия при поиске пути,
-        # иначе они могут заблокировать друг друга в узких проходах.
+        # 1. Собираем препятствия (Города, Бары, Другие враги, Герои)
         obstacles = set()
-        for i in self.enemy_list:
-            obstacles.add((int(i.position[0]), int(i.position[1])))
-        for enemy in self.enemy_list:
-            # 1. Найти ближайшего героя
+
+        # города
+        for x in range(GRID_WIDTH):
+            for y in range(GRID_HEIGHT):
+                if self.grid_types[x][y] in ['town', 'bar']:
+                    obstacles.add((x, y))
+
+        # герои
+        for h in self.heroes_list:
+            obstacles.add((int(h.center_x // TILE_SIZE), int(h.center_y // TILE_SIZE)))
+
+        # враги
+        enemy_positions = {}  # Map index -> pos
+        for idx, enemy in enumerate(self.enemy_list):
+            pos = (int(enemy.center_x // TILE_SIZE), int(enemy.center_y // TILE_SIZE))
+            enemy_positions[idx] = pos
+            obstacles.add(pos)
+
+        # 2. Планируем путь для каждого врага
+        for idx, enemy in enumerate(self.enemy_list):
+            # Временно убираем текущую позицию этого врага из препятствий, чтобы он мог выйти
+            current_pos = enemy_positions[idx]
+            if current_pos in obstacles:
+                obstacles.remove(current_pos)
+
             closest_hero = None
             min_dist = float('inf')
+            e_gx, e_gy = current_pos
 
-            e_gx = int(enemy.center_x // TILE_SIZE)
-            e_gy = int(enemy.center_y // TILE_SIZE)
-
+            # Ищем цель
             for hero in self.heroes_list:
                 h_gx = int(hero.center_x // TILE_SIZE)
                 h_gy = int(hero.center_y // TILE_SIZE)
@@ -691,46 +527,59 @@ class GameView(arcade.View):
                     closest_hero = hero
 
             if closest_hero:
-                # 2. Построить путь BFS
-                target_gx = int(closest_hero.center_x // TILE_SIZE)
-                target_gy = int(closest_hero.center_y // TILE_SIZE)
+                # для поиска пути временно убираем героя из obstacles
+                hero_pos = (int(closest_hero.center_x // TILE_SIZE), int(closest_hero.center_y // TILE_SIZE))
+                if hero_pos in obstacles:
+                    obstacles.remove(hero_pos)
 
-                path = bfs_path((e_gx, e_gy), (target_gx, target_gy), obstacles=obstacles)
+                path = bfs_path((e_gx, e_gy), hero_pos, obstacles=obstacles)
 
-                # 3. Атака или Движение
-                if len(path) <= enemy.get_stat('move_range')[0]:
-                    apply_ability(enemy, closest_hero, enemy.selected_ability)
-                    steps = [int(enemy.position[0]), int(enemy.position[1])]
-                else:
-                    # Движение
+                # Возвращаем героя в obstacles
+                obstacles.add(hero_pos)
+
+                if len(path) > 0:
+                    # Если путь найден
                     move_limit = enemy.get_stat('move_range')[0]
-                    # Берем первые N шагов, исключая последний шаг (там герой)
-                    steps = path[:move_limit]
-                    if steps and steps[-1] == (target_gx, target_gy):
-                        steps.pop()
+                    real_steps = path
+                    if real_steps and real_steps[-1] == hero_pos:
+                        real_steps.pop()  # Убираем клетку героя из маршрута перемещения
 
-                    # Заполняем очередь анимации
-                    for sx, sy in steps:
-                        world_x = sx * TILE_SIZE + TILE_SIZE / 2
-                        world_y = sy * TILE_SIZE + TILE_SIZE / 2
-                        enemy.path_queue.append((world_x, world_y))
-                obstacles.add(steps[-1]) # там будет находиться враг
-        # Переходим в фазу движения
+                    # Ограничиваем дальность
+                    steps = real_steps[:move_limit]
+
+                    if len(path) <= enemy.get_stat('attack_range')[0]:
+                        enemy.selected_ability = random.choice(enemy.abilities)
+                        print(f'Противник использует способность:\n{enemy.selected_ability.get('name', '')}')
+                        apply_ability(enemy, closest_hero,
+                                      enemy.selected_ability.get('effect', 'The entity does not have any abilities'))
+                        # остаемся на месте и возвращаем в obstacles
+                        obstacles.add(current_pos)
+                    else:
+                        # двигаемся
+                        for sx, sy in steps:
+                            world_x = sx * TILE_SIZE + TILE_SIZE / 2
+                            world_y = sy * TILE_SIZE + TILE_SIZE / 2
+                            enemy.path_queue.append((world_x, world_y))
+
+                        # новая позиция врага
+                        obstacles.add(steps[-1])
+                else:
+                    # пути нет (заблокирован) - стоим
+                    obstacles.add(current_pos)
+            else:
+                # нет героев - стоим
+                obstacles.add(current_pos)
+
         self.turn_state = ENEMY_MOVING
 
-    def end_turn(self):
-        print("Конец хода игрока.")
-        # Обновление эффектов
-        for entity in self.entity_list:
-            entity.update_effects_turn()
-
-        self.turn_state = ENEMY_CALCULATING
-
     def on_key_press(self, key, modifiers):
-        # Блокировка управления во время хода врага
-        if self.turn_state != PLAYER_TURN:
+        # Сохранение по F5
+        if key == arcade.key.F5:
+            database.save_game_state(self.map_seed, self.heroes_list, self.enemy_list, self.lairs_list)
             return
 
+        if self.turn_state != PLAYER_TURN:
+            return
         if key == arcade.key.UP:
             self.camera_vel[1] = 1
         elif key == arcade.key.DOWN:
@@ -745,7 +594,6 @@ class GameView(arcade.View):
                 self.selected_unit = self.heroes_list[self.current_unit_index]
                 self.camera_mode = "FOLLOW"
         elif key == arcade.key.ENTER:
-            # Проверка входа в бар
             if self.selected_unit:
                 tiles = arcade.get_sprites_at_point(self.selected_unit.position, self.tile_list)
                 if tiles and tiles[0].properties.get('type') == 'bar':
@@ -760,73 +608,194 @@ class GameView(arcade.View):
         if key in [arcade.key.LEFT, arcade.key.RIGHT]:
             self.camera_vel[0] = 0
 
+    def on_update(self, delta_time):
+        if len(self.lairs_list) == 0:
+            print("ПОБЕДА!")
+            self.window.show_view(StartView())
+            return
+        elif len(self.heroes_list) == 0:
+            arcade.stop_sound(self.background_music_player)
+            self.window.show_view(GameOverView())
+            return
+        if self.char_info_overlay.visible:
+            self.char_info_overlay.update(delta_time)
+
+        if self.turn_state == ENEMY_CALCULATING:
+            self.enemy_turn_logic()
+        elif self.turn_state == ENEMY_MOVING:
+            any_moving = False
+            for enemy in self.enemy_list:
+                enemy.update_position()
+                if enemy.is_moving: any_moving = True
+            if not any_moving:
+                self.turn_state = PLAYER_TURN
+                for unit in self.heroes_list:
+                    unit['moves_left'] = unit['moves_count']
+                print("Ход игрока!")
+
+        for hero in self.heroes_list:
+            hero.update_position()
+
+        # Камера
+        map_w = GRID_WIDTH * TILE_SIZE
+        map_h = GRID_HEIGHT * TILE_SIZE
+        half_view_w = (SCREEN_WIDTH / 2)
+        half_view_h = (SCREEN_HEIGHT / 2)
+        nx, ny = self.camera.position
+        if self.camera_vel[0] != 0 or self.camera_vel[1] != 0:
+            self.camera_mode = "FREE"
+            nx += self.camera_vel[0] * CAMERA_SPEED
+            ny += self.camera_vel[1] * CAMERA_SPEED
+        elif self.camera_mode == "FOLLOW" and self.selected_unit:
+            nx, ny = arcade.math.lerp_2d(self.camera.position, self.selected_unit.position, 0.1)
+        self.camera.position = (
+        max(half_view_w, min(nx, map_w - half_view_w)), max(half_view_h, min(ny, map_h - half_view_h)))
+
+        # Туман
+        if self.heroes_list:
+            if self.turn_state == PLAYER_TURN:
+                self.current_unit_index = self.current_unit_index % len(self.heroes_list)
+                active_unit = self.heroes_list[self.current_unit_index]
+                self.selected_unit = active_unit
+            for hero in self.heroes_list:
+                view_dist = hero.get_stat('view_range')[0] * TILE_SIZE
+                for fog in self.fog_list:
+                    if not fog.visible:
+                        continue
+                    d = math.sqrt((fog.center_x - hero.center_x) ** 2 + (fog.center_y - hero.center_y) ** 2)
+                    if d <= view_dist:
+                        fog.alpha = max(0, fog.alpha - 15)
+                        if fog.alpha == 0: fog.visible = False
+
+        # Логова
+        for lair in self.lairs_list:
+            min_dist = float('inf')
+            for hero in self.heroes_list:
+                d = math.sqrt((hero.center_x - lair.center_x) ** 2 + (hero.center_y - lair.center_y) ** 2)
+                if d < min_dist: min_dist = d
+            if (min_dist / TILE_SIZE) < 5 and not lair.guardians_spawned:
+                lair.guardians_spawned = True
+                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
+                c = 0
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        if c >= 6:
+                            break
+                        if (dx == 0 and dy == 0 or
+                                arcade.get_sprites_at_point((lx * TILE_SIZE, ly * TILE_SIZE), self.entity_list)):
+                            continue
+                        self.spawn_enemy(lx + dx, ly + dy, is_guardian=True)
+                        c += 1
+            if time.time() - lair.last_spawn_time > lair.next_spawn_interval:
+                lair.last_spawn_time = time.time()
+                lair.next_spawn_interval = random.randint(40, 90)
+                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
+                for _ in range(3):
+                    for sx in range(-2, 2):
+                        for sy in range(-2, 2):
+                            if (not (arcade.get_sprites_at_point((lx * TILE_SIZE, ly * TILE_SIZE), self.entity_list))
+                                    and sx != 0 and sy != 0):
+                                self.spawn_enemy(lx + sx, ly + ly)
+            if lair.guardians_needed <= 0:
+                lair.kill()
+                self.lairs_list.remove(lair)
+
+        # Смерть
+        for entity in self.entity_list:
+            if entity.get_stat('hp')[0] <= 0:
+                if getattr(entity, 'is_guardian', False):
+                    n_lair, min_d = None, float('inf')
+                    for l in self.lairs_list:
+                        d = math.sqrt((entity.center_x - l.center_x) ** 2 + (entity.center_y - l.center_y) ** 2)
+                        if d < min_d: min_d = d; n_lair = l
+                    if n_lair and min_d < TILE_SIZE * 10: n_lair.guardians_needed -= 1
+                entity.kill()
+                if entity in self.heroes_list: self.heroes_list.remove(entity)
+                if entity in self.enemy_list: self.enemy_list.remove(entity)
+            elif entity.get_stat('hp')[-1] > entity.get_stat('max_hp')[0]:
+                entity['hp'] = entity.get_stat('max_hp')[0] + entity.get_stat('hp')[1]
+
+    def on_draw(self):
+        self.clear()
+        if self.camera: self.camera.use()
+        self.tile_list.draw()
+        self.entity_list.draw()
+        for lair in self.lairs_list:
+            arcade.draw_text(f"{lair.guardians_needed}", lair.center_x, lair.center_y + 50, arcade.color.RED, 14,
+                             anchor_x="center")
+        self.fog_list.draw()
+        self.ui_camera.use()
+        self.char_info_overlay.draw()
+
+    def spawn_enemy(self, x_grid, y_grid, is_guardian=False):
+        if is_guardian:
+            enemy = Entity('images/guardian.jpg', 'enemy', json_data=GUARD_JSON.copy())
+        else:
+            enemy = Entity("images/enemy.jpg", "enemy", json_data=ENEMY_JSON.copy())
+        enemy.is_guardian = is_guardian
+        enemy.center_x = x_grid * TILE_SIZE + TILE_SIZE / 2
+        enemy.center_y = y_grid * TILE_SIZE + TILE_SIZE / 2
+        self.entity_list.append(enemy)
+        self.enemy_list.append(enemy)
+
+    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        self.char_info_overlay.on_scroll(scroll_y)
+
+    def end_turn(self):
+        print("Конец хода игрока.")
+        for entity in self.entity_list:
+            entity.update_effects_turn()
+        self.turn_state = ENEMY_CALCULATING
+
     def on_mouse_press(self, x, y, button, modifiers):
         if self.turn_state != PLAYER_TURN:
             return
-        if not self.camera:
-            return
+        world_point = self.camera.unproject((x, y))
+        wx, wy = world_point[0], world_point[1]
 
+        # Инфо по ПКМ
         if button == arcade.MOUSE_BUTTON_RIGHT:
-            world_point = self.camera.unproject((x, y))
             clicked = arcade.get_sprites_at_point(world_point, self.entity_list)
-
             if clicked:
                 target = clicked[0]
-                # Логика смены позиции: Left -> Right -> Left
                 new_pos = "left"
-                if self.char_info_overlay.visible and self.char_info_overlay.position == "left":
-                    new_pos = "right"
-
+                if self.char_info_overlay.visible and self.char_info_overlay.position == "left": new_pos = "right"
                 self.char_info_overlay.show(target, position=new_pos)
             else:
                 self.char_info_overlay.hide()
             return
 
-
-        world_point = self.camera.unproject((x, y))
-        wx, wy = world_point[0], world_point[1]
-
+        # ЛКМ действия
         active_hero = self.heroes_list[self.current_unit_index] if self.heroes_list else None
         if not active_hero or active_hero.path_queue:
             return
         clicked = arcade.get_sprites_at_point((wx, wy), self.entity_list)
 
-        if button == arcade.MOUSE_BUTTON_RIGHT:
-            world_point = self.camera.unproject((x, y))
-            clicked = arcade.get_sprites_at_point(world_point, self.entity_list)
-
-            if clicked:
-                target = clicked[0]
-                # Логика смены позиции: Left -> Right -> Left
-                new_pos = "left"
-                if self.char_info_overlay.visible and self.char_info_overlay.position == "left":
-                    new_pos = "right"
-
-                self.char_info_overlay.show(target, position=new_pos)
-            else:
-                self.char_info_overlay.hide()
-            return
-
         if clicked:
             target = clicked[0]
             if target in self.heroes_list:
-                self.selected_unit = target
-                self.current_unit_index = self.heroes_list.index(target)
+                if not self.selected_unit.selected_ability:
+                    self.selected_unit = target
+                    self.current_unit_index = self.heroes_list.index(target)
+                else:
+                    apply_ability(self.selected_unit, target, self.selected_unit.selected_ability)
+                    self.selected_unit.selected_ability = None
             elif target.role == 'enemy':
                 dist = abs(active_hero.center_x - target.center_x) + abs(active_hero.center_y - target.center_y)
                 if dist // TILE_SIZE < active_hero['move_range'] and active_hero['moves_left'] > 0:
-                    apply_ability(active_hero, target, active_hero.selected_ability)
-                    active_hero['moves_left'] -= 1
+                    if active_hero.selected_ability:
+                        apply_ability(active_hero, target, active_hero.selected_ability)
+                        active_hero['moves_left'] -= 1
+                    else:
+                        print('Способность не выбрана')
         else:
             clicked_tiles = arcade.get_sprites_at_point((wx, wy), self.tile_list)
             if clicked_tiles:
                 tile = clicked_tiles[0]
-
                 start_gx = int(active_hero.center_x // TILE_SIZE)
                 start_gy = int(active_hero.center_y // TILE_SIZE)
                 end_gx = int(tile.center_x // TILE_SIZE)
                 end_gy = int(tile.center_y // TILE_SIZE)
-
                 dist = abs(end_gx - start_gx) + abs(end_gy - start_gy)
 
                 if active_hero.get_stat('moves_left')[0] > 0 and dist <= active_hero.get_stat('move_range')[0]:
@@ -840,5 +809,5 @@ class GameView(arcade.View):
         if all(u.get_stat('moves_left')[0] <= 0 for u in self.heroes_list):
             self.end_turn()
 
-    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        self.char_info_overlay.on_scroll(scroll_y)
+
+
