@@ -32,10 +32,19 @@ class Entity(arcade.Sprite):
         self.width = 100
         self.height = 120
         self.role = role
-        # Приоритет:  словарь > json > дефолт
+        # Приоритет: явно переданный словарь (например из сохранения) > json > дефолт
         self.stats_dict = stats_dict if stats_dict else {}
         self.active_effects = []
         self.abilities = []
+        self.anim_phase = None  # "forward", "back", None
+        self.anim_start_pos = None
+        self.anim_timer = 0
+        self.anim_duration = 0.2  # Длительность одной фазы в секундах
+
+        # Анимация тряски (Урон)
+        self.shake_timer = 0
+        self.shake_offset_x = 0
+        self.shake_offset_y = 0
 
         # Флаг для загрузки сохранения (чтобы не сбрасывать HP)
         is_loaded_from_save = stats_dict is not None and 'hp' in stats_dict
@@ -66,20 +75,19 @@ class Entity(arcade.Sprite):
 
 
         # Применяем Race/Class только если это новая игра (не из сохранения)
+        # Или если нужно пересчитать бонусы. Для сохранения обычно сохраняют итоговые статы.
         if not skip_stats:
             if 'race' in data:
                 try:
                     self.race = data['race']
-                    for cmd in self.race[1].split(';'):
-                        apply_ability(self, self, cmd)
+                    apply_ability(self, self, self.race[1])
                 except:
                     pass
 
             if "class" in data:
                 try:
                     self.cls = data['class']
-                    for cmd in self.cls[1].split(';'):
-                        apply_ability(self, self, cmd)
+                    apply_ability(self, self, self.cls[1])
                 except:
                     pass
 
@@ -121,6 +129,19 @@ class Entity(arcade.Sprite):
             'stat': stat, 'value': value, 'duration': duration
         })
 
+    def draw(self, **kwargs):
+        # Временно смещаем координаты для отрисовки тряски
+        orig_x = self.center_x
+        orig_y = self.center_y
+        self.center_x += self.shake_offset_x
+        self.center_y += self.shake_offset_y
+
+        super().draw(**kwargs)
+
+        # Возвращаем назад
+        self.center_x = orig_x
+        self.center_y = orig_y
+
     def update_effects_turn(self):
         surviving_effects = []
         for effect in self.active_effects:
@@ -154,6 +175,53 @@ class Entity(arcade.Sprite):
                 angle = math.atan2(dy, dx)
             self.center_x += math.cos(angle) * ENEMY_MOVE_SPEED
             self.center_y += math.sin(angle) * ENEMY_MOVE_SPEED
+
+    def start_attack_animation(self, target_pos):
+        """ Запускает рывок в сторону цели """
+        if not self.anim_phase:
+            self.anim_phase = "forward"
+            self.anim_start_pos = (self.center_x, self.center_y)
+            self.anim_timer = 0
+
+            # Вычисляем точку рывка (на 30% расстояния до цели)
+            dx = target_pos[0] - self.center_x
+            dy = target_pos[1] - self.center_y
+            self.anim_target_lunge = (self.center_x + dx * 0.3, self.center_y + dy * 0.3)
+
+    def start_shake(self, duration=0.2):
+        """ Запускает тряску спрайта """
+        self.shake_timer = duration
+
+    def update_animation_logic(self, delta_time):
+        """ Обновляет логику смещений (вызывать в update) """
+        # Логика рывка (Lunge)
+        if self.anim_phase:
+            self.anim_timer += delta_time
+            t = min(self.anim_timer / self.anim_duration, 1.0)
+
+            if self.anim_phase == "forward":
+                # Летим вперед
+                self.center_x = arcade.math.lerp(self.anim_start_pos[0], self.anim_target_lunge[0], t)
+                self.center_y = arcade.math.lerp(self.anim_start_pos[1], self.anim_target_lunge[1], t)
+                if t >= 1.0:
+                    self.anim_phase = "back"
+                    self.anim_timer = 0
+            elif self.anim_phase == "back":
+                # Возвращаемся
+                self.center_x = arcade.math.lerp(self.anim_target_lunge[0], self.anim_start_pos[0], t)
+                self.center_y = arcade.math.lerp(self.anim_target_lunge[1], self.anim_start_pos[1], t)
+                if t >= 1.0:
+                    self.anim_phase = None
+                    self.center_x, self.center_y = self.anim_start_pos
+        # Логика тряски (Shake)
+        if self.shake_timer > 0:
+            self.shake_timer -= delta_time
+            # Генерируем случайное смещение
+            self.shake_offset_x = random.uniform(-5, 5)
+            self.shake_offset_y = random.uniform(-5, 5)
+            if self.shake_timer <= 0:
+                self.shake_offset_x = 0
+                self.shake_offset_y = 0
 
     def receive_damage(self, raw_damage):
         armor = self.get_stat('armor')[0]

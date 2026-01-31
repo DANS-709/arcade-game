@@ -38,7 +38,7 @@ EXTEND_PARAMS = {
 GUARD_JSON = {
     "name": "guard",
     "race": ["ancient","hero['moves_range'] = 6"],
-    "class": ["protector", "buff(hero, 'hp', 10, 5); hero['armor'] = 2"],
+    "class": ["protector", "buff('hero', 'hp', 10, 5); hero['armor'] = 2"],
     "stats": {"dex": 2, "str": 1, "int": 6, "cha": 7},
     "level": 1,
     "hp": 30,

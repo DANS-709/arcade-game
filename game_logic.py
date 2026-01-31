@@ -7,11 +7,13 @@ import zipfile
 import json
 
 
-def apply_ability(source, target, effect):
+def apply_ability(source, target, effect, eff_manager=None):
     effect_script = effect
     s_data = source.get_as_dict()
     t_data = target.get_as_dict()
     pending_buffs = []
+    source_old_hp = s_data['hp']
+    target_old_hp = t_data['hp']
 
     def buff_func(targ, stat, val, dur):
         target_obj = None
@@ -29,8 +31,9 @@ def apply_ability(source, target, effect):
             if cmd.strip(): exec(cmd.strip(), {}, context)
     except Exception as e:
         print(f"Ошибка применения эффекта: {e}")
+        source['moves_left'] += 1  # если произошла ошибка, то возвращаем ход
+        return
 
-        source['moves_left'] += 1
 
     for key in target.stats_dict.keys():
         target.stats_dict[key] = context['target'][key] - target.get_stat(key)[1]
@@ -39,6 +42,19 @@ def apply_ability(source, target, effect):
 
     for (obj, stat, val, dur) in pending_buffs:
         obj.add_effect(stat, val, dur)
+    if eff_manager:
+        source.start_attack_animation((target.center_x, target.center_y))
+        if source.get_stat('hp')[0] < source_old_hp:  # Если HP уменьшилось
+            eff_manager.add_damage_effect(source.center_x, source.center_y)
+            target.start_shake()
+        elif source.get_stat('hp')[0] > source_old_hp:  # HP увеличилось
+            eff_manager.add_heal_effect(source.center_x, source.center_y)
+        if target.get_stat('hp')[0] < target_old_hp:  # Если HP уменьшилось
+            eff_manager.add_damage_effect(target.center_x, target.center_y)
+            target.start_shake()
+        elif target.get_stat('hp')[0] > target_old_hp:  # HP увеличилось
+            eff_manager.add_heal_effect(target.center_x, target.center_y)
+
 
 
 def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HEIGHT, obstacles=None):

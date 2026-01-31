@@ -9,6 +9,7 @@ from constants import *
 from entities import Entity, Lair
 from game_logic import bfs_path, apply_ability, load_characters_from_zip
 from ui import CharacterInfoOverlay
+from effects import EffectManager
 import database
 
 
@@ -295,6 +296,7 @@ class GameView(arcade.View):
         self.map_seed = None  # Для сохранения
         self.tile_list = None
         self.entity_list = None
+        self.effect_manager = EffectManager()
         self.fog_list = None
         self.enemy_list = None
         self.heroes_list = None
@@ -317,6 +319,7 @@ class GameView(arcade.View):
         self.enemy_list = arcade.SpriteList()
         self.heroes_list = arcade.SpriteList()
         self.fog_list = arcade.SpriteList()
+        self.towns = arcade.SpriteList()
         self.ui_camera = arcade.camera.Camera2D()
         self.char_info_overlay = CharacterInfoOverlay()
         self.lairs_list = []
@@ -371,6 +374,8 @@ class GameView(arcade.View):
 
                 try:
                     tile = arcade.Sprite(img_file)
+                    if tile_type in ('bar', 'town'):
+                        self.towns.append(tile)
                 except:
                     color = arcade.color.GREEN
                     if tile_type == 'town':
@@ -387,7 +392,8 @@ class GameView(arcade.View):
                 tile.center_y = y * TILE_SIZE + TILE_SIZE / 2
                 tile.properties = {'type': tile_type, 'grid_x': x, 'grid_y': y}
                 self.tile_list.append(tile)
-                if tile_type == "bar": valid_spawn_tiles.append(tile)
+                if tile_type == "bar":
+                    valid_spawn_tiles.append(tile)
 
                 try:
                     fog = arcade.Sprite("images/_fog.png")
@@ -438,7 +444,6 @@ class GameView(arcade.View):
             heroes = load_characters_from_zip()
             if not heroes:
                 self.success = False
-                return
             self.success = True
             positions = [
                 (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
@@ -446,7 +451,7 @@ class GameView(arcade.View):
                 (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] + TILE_SIZE),
                 (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] + TILE_SIZE)
             ]
-
+            print(positions)
             # Создаем героев
             for i in range(len(heroes)):
                 hero = Entity(f"images/hero_{i + 1}.jpg", "hero", json_data=heroes[i])
@@ -473,6 +478,8 @@ class GameView(arcade.View):
                         break
                 if not too_close:
                     l_pos = (lx * TILE_SIZE + TILE_SIZE / 2, ly * TILE_SIZE + TILE_SIZE / 2)
+                    if arcade.get_sprites_at_point(l_pos, self.towns):
+                        continue
                     lair = Lair(l_pos)
                     self.lairs_list.append(lair)
                     self.tile_list.append(lair)
@@ -550,7 +557,8 @@ class GameView(arcade.View):
                         enemy.selected_ability = random.choice(enemy.abilities)
                         print(f'Противник использует способность:\n{enemy.selected_ability.get('name', '')}')
                         apply_ability(enemy, closest_hero,
-                                      enemy.selected_ability.get('effect', 'The entity does not have any abilities'))
+                                      enemy.selected_ability.get('effect', 'The entity does not have any abilities'),
+                                      self.effect_manager)
                         # остаемся на месте и возвращаем в obstacles
                         obstacles.add(current_pos)
                     else:
@@ -619,13 +627,23 @@ class GameView(arcade.View):
         if self.char_info_overlay.visible:
             self.char_info_overlay.update(delta_time)
 
+        self.effect_manager.update(delta_time)
+        # Эффект ходьбы
+        for entity in self.entity_list:
+            # Обновляем логику рывков и тряски
+            entity.update_animation_logic(delta_time)
+            if hasattr(entity, 'path_queue') and entity.path_queue:
+                self.effect_manager.add_walk_effect(entity.center_x, entity.bottom)
+
+
         if self.turn_state == ENEMY_CALCULATING:
             self.enemy_turn_logic()
         elif self.turn_state == ENEMY_MOVING:
             any_moving = False
             for enemy in self.enemy_list:
                 enemy.update_position()
-                if enemy.is_moving: any_moving = True
+                if enemy.is_moving:
+                    any_moving = True
             if not any_moving:
                 self.turn_state = PLAYER_TURN
                 for unit in self.heroes_list:
@@ -689,12 +707,13 @@ class GameView(arcade.View):
                 lair.last_spawn_time = time.time()
                 lair.next_spawn_interval = random.randint(40, 90)
                 lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
+                print('Вышли бродячие монстры!')
                 for _ in range(3):
                     for sx in range(-2, 2):
                         for sy in range(-2, 2):
-                            if (not (arcade.get_sprites_at_point((lx * TILE_SIZE, ly * TILE_SIZE), self.entity_list))
-                                    and sx != 0 and sy != 0):
-                                self.spawn_enemy(lx + sx, ly + ly)
+                            if (not (arcade.get_sprites_at_point(((lx + sx) * TILE_SIZE, ly * TILE_SIZE),
+                                                                 self.entity_list)) and sx != 0 and sy != 0):
+                                self.spawn_enemy(lx + sx, ly + sy)
             if lair.guardians_needed <= 0:
                 lair.kill()
                 self.lairs_list.remove(lair)
@@ -724,6 +743,7 @@ class GameView(arcade.View):
         for lair in self.lairs_list:
             arcade.draw_text(f"{lair.guardians_needed}", lair.center_x, lair.center_y + 50, arcade.color.RED, 14,
                              anchor_x="center")
+        self.effect_manager.draw()
         self.fog_list.draw()
         self.ui_camera.use()
         self.char_info_overlay.draw()
@@ -781,12 +801,12 @@ class GameView(arcade.View):
                     self.selected_unit = target
                     self.current_unit_index = self.heroes_list.index(target)
                 elif dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
-                    apply_ability(self.selected_unit, target, self.selected_unit.selected_ability)
+                    apply_ability(self.selected_unit, target, self.selected_unit.selected_ability, self.effect_manager)
                     active_hero['moves_left'] -= 1
             elif target.role == 'enemy':
                 if dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
                     if active_hero.selected_ability:
-                        apply_ability(active_hero, target, active_hero.selected_ability)
+                        apply_ability(active_hero, target, active_hero.selected_ability, self.effect_manager)
                         active_hero['moves_left'] -= 1
                     else:
                         print('Способность не выбрана')
