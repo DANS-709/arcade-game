@@ -1,4 +1,6 @@
 from collections import deque
+from tkinter import filedialog  # для выбора файла
+import tkinter as tk
 import random
 from constants import *
 import zipfile
@@ -11,12 +13,13 @@ def apply_ability(source, target, effect):
     t_data = target.get_as_dict()
     pending_buffs = []
 
-    def buff_func(target_dict, stat, val, dur):
+    def buff_func(targ, stat, val, dur):
         target_obj = None
-        if target_dict.get('role') == source.role:
-            target_obj = source
-        elif target_dict.get('role') == target.role:
+        if targ.lower() == 'target':
             target_obj = target
+        elif targ.lower() == 'hero':
+            target_obj = source
+
         if target_obj:
             pending_buffs.append((target_obj, stat, val, dur))
 
@@ -75,11 +78,6 @@ def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HE
         curr = came_from[curr]
     path.reverse()
     return path
-
-
-
-from tkinter import filedialog  # для выбора файла
-import tkinter as tk
 
 
 def load_characters_from_zip():

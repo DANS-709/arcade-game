@@ -43,17 +43,17 @@ GUARD_JSON = {
     "level": 1,
     "hp": 30,
     "abilities": [
-        {"name": "обычный удар", "effect": "target['hp'] -= 3; buff(hero, 'hp', 1, 2)",
+        {"name": "обычный удар", "effect": "target['hp'] -= 3; buff('hero', 'hp', 1, 2)",
          "description": "Наносит урон врагу, получая небольшой бафф."},
         {"name": "Удар с воздуха",
-         "effect": "buff(target, 'max_hp', -3, 2);target['hp'] -= 7;hero['hp'] -= 5; buff(hero, 'hp', -2, 1)",
+         "effect": "buff('target', 'max_hp', -3, 2);target['hp'] -= 7;hero['hp'] -= 5; buff('hero', 'hp', -2, 1)",
          "description": "взлетает вверх, после чего падает на противника"}
     ],
     "image_b64": ""  # Пусто, загрузится дефолтная
 }
 ENEMY_JSON = {"name": "spooky scary sceleton",
-    "race": ["sceleton","buff(hero, 'move_range', -1, 2)"],
-    "class": ["warrior","buff(hero, 'hp', -5, 2)"],
+    "race": ["sceleton","buff('hero', 'move_range', -1, 2)"],
+    "class": ["warrior","buff('hero', 'hp', -5, 2)"],
     "stats": {"dex": 2, "str": 1, "int": 2, "cha": -3},
     "level": 1,
     "hp": 15,

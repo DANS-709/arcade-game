@@ -19,8 +19,7 @@ class ResourceManager:
 
     @classmethod
     def load_resources(cls):
-        if cls.loaded:
-            return
+        if cls.loaded: return
         try:
             for i in range(51):
                 filename = f"images/start_menu/start_menu_{i:03d}.jpg"
@@ -630,7 +629,7 @@ class GameView(arcade.View):
             if not any_moving:
                 self.turn_state = PLAYER_TURN
                 for unit in self.heroes_list:
-                    unit['moves_left'] = unit['moves_count']
+                    unit['moves_left'] = unit.get_stat('moves_count')[0]
                 print("Ход игрока!")
 
         for hero in self.heroes_list:
@@ -710,8 +709,10 @@ class GameView(arcade.View):
                         if d < min_d: min_d = d; n_lair = l
                     if n_lair and min_d < TILE_SIZE * 10: n_lair.guardians_needed -= 1
                 entity.kill()
-                if entity in self.heroes_list: self.heroes_list.remove(entity)
-                if entity in self.enemy_list: self.enemy_list.remove(entity)
+                if entity in self.heroes_list:
+                    self.heroes_list.remove(entity)
+                if entity in self.enemy_list:
+                    self.enemy_list.remove(entity)
             elif entity.get_stat('hp')[-1] > entity.get_stat('max_hp')[0]:
                 entity['hp'] = entity.get_stat('max_hp')[0] + entity.get_stat('hp')[1]
 
@@ -745,6 +746,7 @@ class GameView(arcade.View):
         print("Конец хода игрока.")
         for entity in self.entity_list:
             entity.update_effects_turn()
+            entity['hp'] = entity.get_stat('max_hp')[0]  # ограничиваем хп
         self.turn_state = ENEMY_CALCULATING
 
     def on_mouse_press(self, x, y, button, modifiers):
@@ -773,16 +775,16 @@ class GameView(arcade.View):
 
         if clicked:
             target = clicked[0]
+            dist = abs(active_hero.center_x - target.center_x) + abs(active_hero.center_y - target.center_y)
             if target in self.heroes_list:
                 if not self.selected_unit.selected_ability:
                     self.selected_unit = target
                     self.current_unit_index = self.heroes_list.index(target)
-                else:
+                elif dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
                     apply_ability(self.selected_unit, target, self.selected_unit.selected_ability)
-                    self.selected_unit.selected_ability = None
+                    active_hero['moves_left'] -= 1
             elif target.role == 'enemy':
-                dist = abs(active_hero.center_x - target.center_x) + abs(active_hero.center_y - target.center_y)
-                if dist // TILE_SIZE < active_hero['move_range'] and active_hero['moves_left'] > 0:
+                if dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
                     if active_hero.selected_ability:
                         apply_ability(active_hero, target, active_hero.selected_ability)
                         active_hero['moves_left'] -= 1
@@ -805,7 +807,7 @@ class GameView(arcade.View):
                         world_y = sy * TILE_SIZE + TILE_SIZE / 2
                         active_hero.path_queue.append((world_x, world_y))
                     active_hero['moves_left'] -= 1
-
+        self.selected_unit.selected_ability = None  # убираем выбранную способность (уже использовали или пошли)
         if all(u.get_stat('moves_left')[0] <= 0 for u in self.heroes_list):
             self.end_turn()
 
