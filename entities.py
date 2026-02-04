@@ -29,7 +29,7 @@ class Entity(arcade.Sprite):
         else:
             super().__init__(filename or "images/hero_1.jpg")
 
-        self.width = 100
+        self.width = 120
         self.height = 120
         self.role = role
         # Приоритет: явно переданный словарь (например из сохранения) > json > дефолт
@@ -129,6 +129,19 @@ class Entity(arcade.Sprite):
             'stat': stat, 'value': value, 'duration': duration
         })
 
+    def equip_item(self, item):
+        """ Применение статов и способностей предмета """
+        # 1. Суммируем статы
+        for stat, value in item.stats_dict.items():
+            current_val = self.stats_dict.get(stat, 0)
+            self.stats_dict[stat] = current_val + value
+
+        # 2. Добавляем способности
+        if item.abilities:
+            self.abilities.extend(item.abilities)
+
+        print(f"{self.name} купил {item.name}!")
+
     def draw(self, **kwargs):
         # Временно смещаем координаты для отрисовки тряски
         orig_x = self.center_x
@@ -225,12 +238,45 @@ class Entity(arcade.Sprite):
 
     def receive_damage(self, raw_damage):
         armor = self.get_stat('armor')[0]
-        defense_percent = self.get_stat('defense')[0]
-        reduced_damage = raw_damage * (1 - defense_percent / 100)
+        defense_percent = max(100, self.get_stat('defense')[0])
+        reduced_damage = raw_damage * (1 - defense_percent // 100)
         final_damage = max(0, reduced_damage - armor)
         self.stats_dict['hp'] -= final_damage
         return final_damage
 
+
+class ShopItem(arcade.Sprite):
+    """ Предмет, который можно купить """
+
+    def __init__(self, item_data, x, y, scale):
+        # item_data - это словарь с параметрами предмета
+        self.name = item_data.get("name", "Unknown Item")
+        self.image_path = item_data.get("image", "images/potion.png")
+
+        try:
+            super().__init__(self.image_path)
+        except:
+            super().__init__()
+            self.color = arcade.color.GOLD
+        self.width, self.height = 32 * scale, 32 * scale
+
+        self.center_x = x
+        self.center_y = y
+        self.price = item_data.get("price", 100)
+
+        # Статы, которые дает предмет
+        self.stats_dict = item_data.get("stats", {})
+        # Способности, которые дает предмет
+        self.abilities = item_data.get("abilities", [])
+
+        # Поля для совместимости с CharacterInfoOverlay
+        self.role = "item"
+        self.active_effects = []
+
+    def get_stat(self, stat_name):
+        """ Возвращает (value, buff, base) для UI """
+        val = self.stats_dict.get(stat_name, 0)
+        return (val, 0, val)
 
 class Lair(arcade.Sprite):
     def __init__(self, position):
@@ -243,5 +289,6 @@ class Lair(arcade.Sprite):
         self.position = position
         self.guardians_spawned = False
         self.guardians_needed = 6
+        self.spawn_interval = [2, 3]
         self.last_spawn_time = time.time()
-        self.next_spawn_interval = random.randint(40, 90)
+        self.next_spawn_interval = random.randint(*self.spawn_interval)

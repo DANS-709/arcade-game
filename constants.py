@@ -29,11 +29,38 @@ EXTEND_PARAMS = {
     'moves_left': 'moves_count',
     'damage_deal': '0',
     'view_range': '4',
-    'move_range': '4',
+    'move_range': '3',
     'attack_range': '3',
     'armor': '0',      # Плоская защита (вычитается из урона)
     'defense': '0'     # Процентная защита (снижает урон на %)
 }
+
+ITEMS_DB = [{
+        "name": "Меч",
+        "image": "images/sword.png",
+        "price": 175,
+        "stats": {"armor": 1},
+        "abilities": [
+            {"name": "Удар эфесом", "effect": "target['hp'] -= 8; buff('target', 'defense', -10, 2)", "description": "Наносит 8 урона и снижает защиту."}
+        ]
+    },
+    {
+        "name": "Деревянный щит",
+        "image": "images/shield.png",
+        "price": 75,
+        "stats": {"armor": 3, "max_hp": 20},
+        "abilities": []
+    },{
+        "name": "Зелье здоровья",
+        "image": "images/potion_red.png",
+        "price": 120,
+        "stats": {},
+        "abilities": [
+            {"name": "Выпить", "effect": "hero['hp'] += 5", "description": "Восстанавливает HP."}
+        ]
+    }
+]
+
 
 GUARD_JSON = {
     "name": "guard",

@@ -15,7 +15,10 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS game_state (
             id INTEGER PRIMARY KEY,
-            map_seed INTEGER
+            map_seed INTEGER,
+            name TEXT,
+            time_of_creation TEXT,
+            duration_of_game TEXT
         )
     ''')
 
@@ -23,6 +26,7 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS entities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
             role TEXT,
             x REAL,
             y REAL,
@@ -30,7 +34,9 @@ def init_db():
             effects_json TEXT,
             abilities_json TEXT,
             is_guardian INTEGER,
-            image_path TEXT
+            image_path TEXT,
+            map_id INTEGER,
+            FOREIGN KEY (map_id) REFERENCES game_state (id) ON DELETE CASCADE
         )
     ''')
 
@@ -42,9 +48,34 @@ def init_db():
             y REAL,
             guardians_needed INTEGER,
             next_spawn_interval REAL,
-            guardians_spawned INTEGER
+            guardians_spawned INTEGER,
+            map_id INTEGER,
+            FOREIGN KEY (map_id) REFERENCES game_state (id) ON DELETE CASCADE
         )
     ''')
+
+    # Справочник предметов (Items)
+    cursor.execute('''
+            CREATE TABLE IF NOT EXISTS items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                image_path TEXT,
+                price INTEGER,
+                stats_json TEXT,
+                abilities_json TEXT
+            )
+        ''')
+
+    # Инвентарь (Связь сущностей и предметов)
+    cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                FOREIGN KEY (entity_id) REFERENCES entities (id) ON DELETE CASCADE,
+                FOREIGN KEY (item_id) REFERENCES items (id) ON DELETE CASCADE
+            )
+        ''')
 
     conn.commit()
     conn.close()
@@ -59,6 +90,8 @@ def save_game_state(seed, heroes, enemies, lairs):
     cursor.execute('DELETE FROM game_state')
     cursor.execute('DELETE FROM entities')
     cursor.execute('DELETE FROM lairs')
+    cursor.execute('DELETE FROM items')
+    cursor.execute('DELETE FROM inventory')
 
     # 2. Сохраняем сид
     cursor.execute('INSERT INTO game_state (map_seed) VALUES (?)', (seed,))
@@ -71,9 +104,9 @@ def save_game_state(seed, heroes, enemies, lairs):
         is_guardian = 1 if getattr(entity, 'is_guardian', False) else 0
 
         cursor.execute('''
-            INSERT INTO entities (role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (entity.role, entity.center_x, entity.center_y,
+            INSERT INTO entities (name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (entity.name, entity.role, entity.center_x, entity.center_y,
               stats, effects, abilities, is_guardian, entity.image_path))
 
     # 4. Сохраняем логова
@@ -107,16 +140,18 @@ def load_game_state():
     seed = row[0]
 
     # Сущности
-    cursor.execute('SELECT role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path FROM entities')
+    cursor.execute('''SELECT name, role, x, y,
+     stats_json, effects_json, abilities_json, is_guardian, image_path FROM entities''')
     entities_data = []
     for r in cursor.fetchall():
         entities_data.append({
-            'role': r[0], 'x': r[1], 'y': r[2],
-            'stats': json.loads(r[3]),
-            'effects': json.loads(r[4]),
-            'abilities': json.loads(r[5]),
-            'is_guardian': bool(r[6]),
-            'image_path': r[7]
+            'name': r[0],
+            'role': r[1], 'x': r[2], 'y': r[3],
+            'stats': json.loads(r[4]),
+            'effects': json.loads(r[5]),
+            'abilities': json.loads(r[6]),
+            'is_guardian': bool(r[7]),
+            'image_path': r[8]
         })
 
     # Логова

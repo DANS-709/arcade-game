@@ -3,10 +3,9 @@ from arcade.gui import UIManager
 from arcade.gui.widgets.layout import UIAnchorLayout
 import random
 import math
-import time
 from perlin_noise import PerlinNoise
 from constants import *
-from entities import Entity, Lair
+from entities import Entity, Lair, ShopItem
 from game_logic import bfs_path, apply_ability, load_characters_from_zip
 from ui import CharacterInfoOverlay
 from effects import EffectManager
@@ -204,6 +203,10 @@ class BarView(arcade.View):
     def __init__(self, game_view):
         super().__init__()
         self.game_view = game_view
+        self.items_list = arcade.SpriteList()
+        self.all_list = arcade.SpriteList()
+        self.ui_overlay = game_view.char_info_overlay
+        self.clicks = 0
 
         self.scene = None
         self.player_sprite = None
@@ -217,32 +220,48 @@ class BarView(arcade.View):
 
     def setup(self):
         self.camera = arcade.camera.Camera2D()
-        # Загрузка карты
-        layer_options = {
-            "collisions": {
-                "use_spatial_hash": True
-            },
-        }
 
         # Пытаемся загрузить карту
         try:
-            self.tile_map = arcade.load_tilemap("maps/bar.tmx", scaling=self.scale, layer_options=layer_options)
+            self.tile_map = arcade.load_tilemap("maps/bar.tmx", scaling=self.scale, use_spatial_hash=True)
             self.scene = arcade.Scene.from_tilemap(self.tile_map)
+
+            # Ищем слой объектов с именем "items" в Tiled
+            items_layer = [*self.scene.get_sprite_list('items')]
+            if items_layer:
+                for i, tile_obj in enumerate(items_layer):
+                    try:
+                        data = ITEMS_DB[i]
+                        item = ShopItem(data, tile_obj.center_x, tile_obj.center_y, self.scale)
+                        self.items_list.append(item)
+                        self.all_list.append(item)
+                    except:  # Если мест под предметы больше, чем самих предметов
+                        pass
         except Exception as e:
             print(f"Ошибка загрузки карты бара: {e}.")
+            arcade.stop_sound(self.bar_player)
             self.window.show_view(self.game_view)
+            return
+        self.scene.add_sprite_list("ShopItems", sprite_list=self.items_list)
+
 
         # Игрок
-        self.player_sprite = arcade.Sprite(self.game_view.selected_unit.texture)
+        self.player_sprite = Entity(self.game_view.selected_unit.image_path,'None',
+                             stats_dict=self.game_view.selected_unit.stats_dict)
+        self.player_sprite.name = self.game_view.selected_unit.name
+        self.player_sprite.active_effects = self.game_view.selected_unit.active_effects
+        self.player_sprite.abilities = self.game_view.selected_unit.abilities
         self.player_sprite.width, self.player_sprite.height = (70, 90)
         self.player_sprite.center_x = 200
         self.player_sprite.center_y = 200
         self.scene.add_sprite("Player", self.player_sprite)
+        self.all_list.append(self.player_sprite)
 
         # Физика
         self.physics_engine = arcade.PhysicsEngineSimple(
             self.player_sprite,
-            walls=self.scene["collisions"] if "collisions" in self.scene._name_mapping else arcade.SpriteList()
+            walls=[self.scene["collisions"],
+                   self.items_list] if "collisions" in self.scene._name_mapping else self.items_list
         )
 
     def on_show_view(self):
@@ -252,6 +271,26 @@ class BarView(arcade.View):
         self.clear()
         self.camera.use()
         self.scene.draw()
+
+        # Рисуем ценники над предметами
+        for item in self.items_list:
+            arcade.draw_text(
+                f"{item.price}$",
+                item.center_x,
+                item.top + 10,
+                arcade.color.GOLD,
+                24,
+                anchor_x="center"
+            )
+
+        # Рисуем UI поверх всего
+        self.game_view.ui_camera.use()
+        # Отображаем текущее золото игрока
+        coins = getattr(self.game_view, 'coins', 0)
+        arcade.draw_text(f"Золото: {coins}", SCREEN_WIDTH - 20, SCREEN_HEIGHT - 20,
+                         arcade.color.GOLD, 20, anchor_x="right", anchor_y="top")
+
+        self.ui_overlay.draw()
 
 
     def on_update(self, delta_time):
@@ -269,6 +308,27 @@ class BarView(arcade.View):
 
         self.camera.position = (new_camera_x, new_camera_y)
 
+        if self.ui_overlay.visible:
+            self.ui_overlay.update(delta_time)
+
+    def on_mouse_press(self, x, y, button, modifiers):
+
+        # Преобразуем координаты мыши в координаты мира
+        world_point = self.camera.unproject((x, y))
+
+        # Просмотр информации (ПКМ)
+        if button == arcade.MOUSE_BUTTON_RIGHT:
+            # Проверяем клик по предметам
+            clicked = arcade.get_sprites_at_point(world_point, self.all_list)
+            if clicked:
+                self.clicks = (self.clicks + 1) % 2
+                self.ui_overlay.show(clicked[0], position=["left","right"][self.clicks])
+            else:
+                self.ui_overlay.hide()
+
+    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        self.ui_overlay.on_scroll(scroll_y)
+
     def on_key_press(self, key, modifiers):
         if key == arcade.key.W:
             self.player_sprite.change_y = PLAYER_BAR_SPEED
@@ -278,10 +338,32 @@ class BarView(arcade.View):
             self.player_sprite.change_x = -PLAYER_BAR_SPEED
         elif key == arcade.key.D:
             self.player_sprite.change_x = PLAYER_BAR_SPEED
+        if key == arcade.key.E:
+            # Ищем предметы рядом с игроком
+            closest_item = arcade.get_closest_sprite(self.player_sprite, self.items_list)
+            if closest_item:
+                item, dist = closest_item
+                if dist < (30 * self.scale) * 1.3:  # Если стоим рядом
+                    cost = item.price
+                    current_coins = getattr(self.game_view, 'coins', 0)
+
+                    if current_coins >= cost:
+                        self.game_view.coins = current_coins - cost
+                        buyer = self.game_view.selected_unit
+                        if buyer:
+                            buyer.equip_item(item)
+                            print("Предмет куплен!")
+                            # Удаляем предмет
+                            item.remove_from_sprite_lists()
+                            self.ui_overlay.hide()
+                    else:
+                        print("Недостаточно золота!")
         elif key == arcade.key.ESCAPE:
             # Выход из бара
+            self.ui_overlay.hide()
             arcade.stop_sound(self.bar_player)
             self.window.show_view(self.game_view)
+
 
     def on_key_release(self, key, modifiers):
         if key in [arcade.key.W, arcade.key.S]:
@@ -322,6 +404,7 @@ class GameView(arcade.View):
         self.towns = arcade.SpriteList()
         self.ui_camera = arcade.camera.Camera2D()
         self.char_info_overlay = CharacterInfoOverlay()
+        self.coins = 75
         self.lairs_list = []
         self.camera = arcade.camera.Camera2D()
 
@@ -412,6 +495,7 @@ class GameView(arcade.View):
             for ent_data in load_data['entities']:
                 if ent_data['role'] == 'hero':
                     hero = Entity(ent_data['image_path'], "hero", stats_dict=ent_data['stats'])
+                    hero.name = ent_data['name']
                     hero.active_effects = ent_data['effects']
                     hero.abilities = ent_data['abilities']
                     hero.center_x, hero.center_y = ent_data['x'], ent_data['y']
@@ -420,6 +504,7 @@ class GameView(arcade.View):
                 else:
                     is_guardian = ent_data['is_guardian']
                     enemy = Entity(ent_data['image_path'], "enemy", stats_dict=ent_data['stats'])
+                    enemy.name = ent_data['name']
                     enemy.active_effects = ent_data['effects']
                     enemy.abilities = ent_data['abilities']
                     enemy.is_guardian = is_guardian
@@ -439,11 +524,12 @@ class GameView(arcade.View):
 
         else:
             # Новая игра
-            if not valid_spawn_tiles: valid_spawn_tiles.append(self.tile_list[0])
+            if not valid_spawn_tiles: valid_spawn_tiles.append(self.tile_list[GRID_WIDTH + GRID_WIDTH // 2])
             spawn_point = random.choice(valid_spawn_tiles)
             heroes = load_characters_from_zip()
             if not heroes:
                 self.success = False
+                return
             self.success = True
             positions = [
                 (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
@@ -451,7 +537,6 @@ class GameView(arcade.View):
                 (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] + TILE_SIZE),
                 (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] + TILE_SIZE)
             ]
-            print(positions)
             # Создаем героев
             for i in range(len(heroes)):
                 hero = Entity(f"images/hero_{i + 1}.jpg", "hero", json_data=heroes[i])
@@ -555,7 +640,7 @@ class GameView(arcade.View):
 
                     if len(path) <= enemy.get_stat('attack_range')[0]:
                         enemy.selected_ability = random.choice(enemy.abilities)
-                        print(f'Противник использует способность:\n{enemy.selected_ability.get('name', '')}')
+                        print(f"Противник использует способность:\n{enemy.selected_ability.get('name', '')}")
                         apply_ability(enemy, closest_hero,
                                       enemy.selected_ability.get('effect', 'The entity does not have any abilities'),
                                       self.effect_manager)
@@ -580,6 +665,7 @@ class GameView(arcade.View):
         self.turn_state = ENEMY_MOVING
 
     def on_key_press(self, key, modifiers):
+        a, b = self.selected_unit.center_x // TILE_SIZE, self.selected_unit.center_y // TILE_SIZE
         # Сохранение по F5
         if key == arcade.key.F5:
             database.save_game_state(self.map_seed, self.heroes_list, self.enemy_list, self.lairs_list)
@@ -698,25 +784,16 @@ class GameView(arcade.View):
                     for dy in range(-2, 3):
                         if c >= 6:
                             break
-                        if (dx == 0 and dy == 0 or
-                                arcade.get_sprites_at_point((lx * TILE_SIZE, ly * TILE_SIZE), self.entity_list)):
+                        if ((dx == 0 and dy == 0) or arcade.get_sprites_at_point(
+                                ((lx + dx) * TILE_SIZE + 42, (ly + dy) * TILE_SIZE + 42), self.entity_list)):
                             continue
                         self.spawn_enemy(lx + dx, ly + dy, is_guardian=True)
                         c += 1
-            if time.time() - lair.last_spawn_time > lair.next_spawn_interval:
-                lair.last_spawn_time = time.time()
-                lair.next_spawn_interval = random.randint(40, 90)
-                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
-                print('Вышли бродячие монстры!')
-                for _ in range(3):
-                    for sx in range(-2, 2):
-                        for sy in range(-2, 2):
-                            if (not (arcade.get_sprites_at_point(((lx + sx) * TILE_SIZE, ly * TILE_SIZE),
-                                                                 self.entity_list)) and sx != 0 and sy != 0):
-                                self.spawn_enemy(lx + sx, ly + sy)
+
             if lair.guardians_needed <= 0:
                 lair.kill()
                 self.lairs_list.remove(lair)
+                self.coins += 10
 
         # Смерть
         for entity in self.entity_list:
@@ -725,13 +802,17 @@ class GameView(arcade.View):
                     n_lair, min_d = None, float('inf')
                     for l in self.lairs_list:
                         d = math.sqrt((entity.center_x - l.center_x) ** 2 + (entity.center_y - l.center_y) ** 2)
-                        if d < min_d: min_d = d; n_lair = l
-                    if n_lair and min_d < TILE_SIZE * 10: n_lair.guardians_needed -= 1
+                        if d < min_d:
+                            min_d = d; n_lair = l
+                    if n_lair:
+                        n_lair.guardians_needed -= 1
                 entity.kill()
                 if entity in self.heroes_list:
                     self.heroes_list.remove(entity)
+                    self.coins -= self.coins // len(self.heroes_list) if len(self.heroes_list) > 0 else 0
                 if entity in self.enemy_list:
                     self.enemy_list.remove(entity)
+                    self.coins += 3 if getattr(entity, 'is_guardian', False) else 1
             elif entity.get_stat('hp')[-1] > entity.get_stat('max_hp')[0]:
                 entity['hp'] = entity.get_stat('max_hp')[0] + entity.get_stat('hp')[1]
 
@@ -766,7 +847,24 @@ class GameView(arcade.View):
         print("Конец хода игрока.")
         for entity in self.entity_list:
             entity.update_effects_turn()
-            entity['hp'] = entity.get_stat('max_hp')[0]  # ограничиваем хп
+            if entity['hp'] > entity.get_stat('max_hp')[0]:
+                entity['hp'] = entity.get_stat('max_hp')[0]  # ограничиваем хп
+            entity['mana'] = entity.get_stat('max_mana')[0]
+        for lair in self.lairs_list:
+            lair.next_spawn_interval -= 1
+            if lair.next_spawn_interval <= 0:
+                lair.next_spawn_interval = random.randint(*lair.spawn_interval)
+                lx, ly = int(lair.center_x // TILE_SIZE), int(lair.center_y // TILE_SIZE)
+                print('Вышли бродячие монстры!')
+                c = 0
+                for sx in range(-2, 2):
+                    for sy in range(-2, 2):
+                        if (not (arcade.get_sprites_at_point(((lx + sx) * TILE_SIZE + 42,
+                                                              (ly + sy) * TILE_SIZE + 42),
+                                                             self.entity_list)) and sx != 0 and sy != 0):
+                            if c < 3:
+                                self.spawn_enemy(lx + sx, ly + sy)
+                                c += 1
         self.turn_state = ENEMY_CALCULATING
 
     def on_mouse_press(self, x, y, button, modifiers):

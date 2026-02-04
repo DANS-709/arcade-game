@@ -78,19 +78,20 @@ class CharacterInfoOverlay:
         current_y -= 150
 
         # 3. Статы
-        stats_to_show = [
-            ("HP", f"{int(self.entity.get_stat('hp')[0])}/{int(self.entity.get_stat('max_hp')[0])}"),
-            ("Mana", f"{int(self.entity.get_stat('mana')[0])}/{int(self.entity.get_stat('max_mana')[0])}"),
-            ("AP (ОД)", f"{self.entity.get_stat('moves_left')[0]}"),
-            ("Armor", f"{self.entity.get_stat('armor')[0]}"),
-            ("Defense", f"{self.entity.get_stat('defense')[0]}%"),
-        ]
+        if self.entity.role == 'hero':
+            stats_to_show = [
+                ("HP", f"{int(self.entity.get_stat('hp')[0])}/{int(self.entity.get_stat('max_hp')[0])}"),
+                ("Mana", f"{int(self.entity.get_stat('mana')[0])}/{int(self.entity.get_stat('max_mana')[0])}"),
+                ("AP (ОД)", f"{self.entity.get_stat('moves_left')[0]}"),
+                ("Armor", f"{self.entity.get_stat('armor')[0]}"),
+                ("Defense", f"{self.entity.get_stat('defense')[0]}%"),
+            ]
 
-        for label, val in stats_to_show:
-            self.ui_elements.append(arcade.Text(
-                f"{label}: {val}", content_x, current_y, arcade.color.WHITE, 16
-            ))
-            current_y -= 25
+            for label, val in stats_to_show:
+                self.ui_elements.append(arcade.Text(
+                    f"{label}: {val}", content_x, current_y, arcade.color.WHITE, 16
+                ))
+                current_y -= 25
 
         current_y -= 20
         # 4. Способности
@@ -114,7 +115,7 @@ class CharacterInfoOverlay:
                         self.entity.selected_ability = eff
                         print(f"Selected: {eff}")
 
-                    # Сохраняем начальную Y
+                    # Сохраняем начальную Y позицию в самом объекте кнопки для скролла
                     btn.base_y = btn.center_y
 
                     self.manager.add(btn)
@@ -180,7 +181,7 @@ class CharacterInfoOverlay:
             else:
                 btn.visible = True
     def draw(self):
-        if not self.visible or not self.entity:
+        if not self.visible or not self.entity or not self.sprite_list:
             return
 
         x = 0 if self.position == "left" else SCREEN_WIDTH - self.panel_width

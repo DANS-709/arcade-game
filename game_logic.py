@@ -1,7 +1,7 @@
 from collections import deque
+import random
 from tkinter import filedialog  # для выбора файла
 import tkinter as tk
-import random
 from constants import *
 import zipfile
 import json
@@ -96,6 +96,7 @@ def bfs_path(start_grid, target_grid, grid_width=GRID_WIDTH, grid_height=GRID_HE
     return path
 
 
+
 def load_characters_from_zip():
     # Создаем окно для выбора файла
     root = tk.Tk()
@@ -107,7 +108,7 @@ def load_characters_from_zip():
     )
 
     if not file_path:
-        return None
+        return []
 
     characters = []
 
@@ -124,6 +125,6 @@ def load_characters_from_zip():
 
     except Exception as e:
         print(f"Ошибка при загрузке данных: {str(e)}")
-        return None
+        return []
 
     return characters
