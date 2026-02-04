@@ -80,90 +80,93 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-def save_game_state(seed, heroes, enemies, lairs):
-    """ Сохраняет текущее состояние игры """
+def get_connection():
     conn = sqlite3.connect(DB_NAME)
+    conn.execute("PRAGMA foreign_keys = ON")  # Включаем поддержку связей
+    return conn
+
+
+def save_game_state(world, heroes, enemies, lairs):
+    conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. Очищаем старые сохранения (для прототипа храним только 1 слот)
-    cursor.execute('DELETE FROM game_state')
-    cursor.execute('DELETE FROM entities')
-    cursor.execute('DELETE FROM lairs')
-    cursor.execute('DELETE FROM items')
-    cursor.execute('DELETE FROM inventory')
+    name = world.get('name')
+    time_created = world.get('time_of_creation')
 
-    # 2. Сохраняем сид
-    cursor.execute('INSERT INTO game_state (map_seed) VALUES (?)', (seed,))
-    # 3. Сохраняем сущностей
+    # Ищем, есть ли уже такое сохранение
+    cursor.execute('SELECT id FROM game_state WHERE name = ? AND time_of_creation = ?',
+                   (name, time_created))
+    row = cursor.fetchone()
+
+    if row:
+        save_id = row[0]
+        # Очищаем старые данные сущностей и логов для этого ID
+        cursor.execute('DELETE FROM entities WHERE map_id = ?', (save_id,))
+        cursor.execute('DELETE FROM lairs WHERE map_id = ?', (save_id,))
+        # Обновляем сид (на всякий случай)
+        cursor.execute('UPDATE game_state SET map_seed = ? WHERE id = ?', (world.get('seed'), save_id))
+    else:
+        # Создаем новую запись
+        cursor.execute('INSERT INTO game_state (map_seed, name, time_of_creation) VALUES (?, ?, ?)',
+                       (world.get('seed'), name, time_created))
+        save_id = cursor.lastrowid
+
+    # Сохраняем сущности
     all_entities = [*heroes, *enemies]
     for entity in all_entities:
-        stats = json.dumps(entity.stats_dict)
-        effects = json.dumps(entity.active_effects)
-        abilities = json.dumps(entity.abilities)
-        is_guardian = 1 if getattr(entity, 'is_guardian', False) else 0
-
         cursor.execute('''
-            INSERT INTO entities (name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO entities (name, role, x, y, stats_json, effects_json, abilities_json,
+             is_guardian, image_path, map_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (entity.name, entity.role, entity.center_x, entity.center_y,
-              stats, effects, abilities, is_guardian, entity.image_path))
+              json.dumps(entity.stats_dict), json.dumps(entity.active_effects),
+              json.dumps(entity.abilities), 1 if getattr(entity, 'is_guardian', False) else 0,
+              entity.image_path, save_id))
 
-    # 4. Сохраняем логова
     for lair in lairs:
         cursor.execute('''
-            INSERT INTO lairs (x, y, guardians_needed, next_spawn_interval, guardians_spawned)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO lairs (x, y, guardians_needed, next_spawn_interval, guardians_spawned, map_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (lair.center_x, lair.center_y, lair.guardians_needed, lair.next_spawn_interval,
-              1 if lair.guardians_spawned else 0))
+              1 if lair.guardians_spawned else 0, save_id))
 
     conn.commit()
     conn.close()
     print("Игра сохранена!")
 
+def get_recent_saves(limit=5):
+    """ Возвращает последние сохранения """
+    if not os.path.exists(DB_NAME): return []
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, name, time_of_creation FROM game_state ORDER BY id DESC LIMIT ?', (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
-def load_game_state():
-    """ Загружает состояние. Возвращает словарь с данными или None """
-    if not os.path.exists(DB_NAME):
-        return None
-
-    conn = sqlite3.connect(DB_NAME)
+def load_game_state(save_id):
+    conn = get_connection()
     cursor = conn.cursor()
 
-    # Сид
-    cursor.execute('SELECT map_seed FROM game_state LIMIT 1')
+    cursor.execute('SELECT map_seed FROM game_state WHERE id = ?', (save_id,))
     row = cursor.fetchone()
     if not row:
         conn.close()
         return None
-
     seed = row[0]
 
-    # Сущности
-    cursor.execute('''SELECT name, role, x, y,
-     stats_json, effects_json, abilities_json, is_guardian, image_path FROM entities''')
-    entities_data = []
-    for r in cursor.fetchall():
-        entities_data.append({
-            'name': r[0],
-            'role': r[1], 'x': r[2], 'y': r[3],
-            'stats': json.loads(r[4]),
-            'effects': json.loads(r[5]),
-            'abilities': json.loads(r[6]),
-            'is_guardian': bool(r[7]),
-            'image_path': r[8]
-        })
+    cursor.execute('SELECT name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path FROM entities WHERE map_id = ?', (save_id,))
+    entities_data = [{
+        'name': r[0], 'role': r[1], 'x': r[2], 'y': r[3],
+        'stats': json.loads(r[4]), 'effects': json.loads(r[5]),
+        'abilities': json.loads(r[6]), 'is_guardian': bool(r[7]), 'image_path': r[8]
+    } for r in cursor.fetchall()]
 
-    # Логова
-    cursor.execute('SELECT x, y, guardians_needed, next_spawn_interval, guardians_spawned FROM lairs')
-    lairs_data = []
-    for r in cursor.fetchall():
-        lairs_data.append({
-            'x': r[0], 'y': r[1],
-            'guardians_needed': r[2],
-            'next_spawn_interval': r[3],
-            'guardians_spawned': bool(r[4])
-        })
+    cursor.execute('SELECT x, y, guardians_needed, next_spawn_interval, guardians_spawned FROM lairs WHERE map_id = ?', (save_id,))
+    lairs_data = [{
+        'x': r[0], 'y': r[1], 'guardians_needed': r[2],
+        'next_spawn_interval': r[3], 'guardians_spawned': bool(r[4])
+    } for r in cursor.fetchall()]
 
     conn.close()
     return {'seed': seed, 'entities': entities_data, 'lairs': lairs_data}

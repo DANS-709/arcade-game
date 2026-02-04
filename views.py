@@ -1,8 +1,11 @@
+import datetime
 import arcade
 from arcade.gui import UIManager
 from arcade.gui.widgets.layout import UIAnchorLayout
 import random
 import math
+
+from arcade.gui.widgets.text import UIInputTextStyle
 from perlin_noise import PerlinNoise
 from constants import *
 from entities import Entity, Lair, ShopItem
@@ -92,22 +95,17 @@ class StartView(arcade.View):
         self.anchor_layout = UIAnchorLayout()
         self.manager.add(self.anchor_layout)
         self.setup_widgets()
+        self.select_save= False
 
     def on_click_continue(self, event):
-        # Попытка загрузить игру
-        data = database.load_game_state()
-        if data:
-            self.manager.disable()
-            game_view = GameView()
-            game_view.setup(load_data=data)
-            arcade.stop_sound(self.start_player)
-            self.window.show_view(game_view)
-        else:
-            print("Нет сохранений!")
+        self.select_save = True
+        self.manager.disable()
+        self.window.show_view(SaveListView(self, self.current_frame))
+
 
     def on_click_new_game(self, event):
         self.manager.disable()
-        game_view = GameView()
+        game_view = GameView(self.input_text.text.strip() if self.input_text.text.strip() else 'not_named')
         game_view.setup(load_data=None)  # Новая игра
         if game_view.success:
             arcade.stop_sound(self.start_player)
@@ -119,8 +117,10 @@ class StartView(arcade.View):
         arcade.exit()
 
     def on_show_view(self):
-        self.start_player = ResourceManager.start_music.play(loop=True)
-        arcade.set_background_color(arcade.color.BLACK)
+        if not self.select_save:
+            self.start_player = ResourceManager.start_music.play(loop=True)
+            arcade.set_background_color(arcade.color.BLACK)
+        self.manager.enable()
 
     def on_update(self, delta_time):
         if ResourceManager.start_frames:
@@ -140,30 +140,122 @@ class StartView(arcade.View):
         self.manager.draw()
 
     def setup_widgets(self):
-        self.v_box = arcade.gui.UIBoxLayout()
+        self.v_box = arcade.gui.UIBoxLayout(space_between=10)
+
         button_style = {
-            "normal": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.LIME_GREEN},
-            "hover": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.MALACHITE},
-            "press": {"font_name": ("Arial",), "font_size": 18, "font_color": arcade.color.MALACHITE}
+            "normal": {"font_name": ("Arial",), "font_size": 16, "font_color": arcade.color.LIME_GREEN},
+            "hover": {"font_name": ("Arial",), "font_size": 16, "font_color": arcade.color.MALACHITE},
+            "press": {"font_name": ("Arial",), "font_size": 16, "font_color": arcade.color.MALACHITE}
         }
+        self.input_text = arcade.gui.UIInputText(width=200, text="Введите название мира")
+        self.v_box.add(self.input_text)
 
-        continue_btn = arcade.gui.UITextureButton(text="Продолжить", width=225, texture=ResourceManager.button,
-                                                  texture_hovered=ResourceManager.hover_button, style=button_style)
-        self.v_box.add(continue_btn)
+        continue_btn = arcade.gui.UITextureButton(text="Продолжить", width=225,
+                                                  texture=ResourceManager.button,
+                                                  texture_hovered=ResourceManager.hover_button,
+                                                  style=button_style)
+        continue_btn.place_text(align_x=10)
         continue_btn.on_click = self.on_click_continue
+        self.v_box.add(continue_btn)
 
-        new_game_btn = arcade.gui.UITextureButton(text="Новая Игра", width=225, texture=ResourceManager.button,
-                                                  texture_hovered=ResourceManager.hover_button, style=button_style)
-        self.v_box.add(new_game_btn)
+        new_game_btn = arcade.gui.UITextureButton(text="Новая Игра", width=225,
+                                                  texture=ResourceManager.button,
+                                                  texture_hovered=ResourceManager.hover_button,
+                                                  style=button_style)
         new_game_btn.on_click = self.on_click_new_game
+        continue_btn.place_text(align_x=10)
+        self.v_box.add(new_game_btn)
 
-        quit_btn = arcade.gui.UITextureButton(text="Выход", width=225, texture=ResourceManager.button,
-                                              texture_hovered=ResourceManager.hover_button, style=button_style)
-        self.v_box.add(quit_btn)
+        quit_btn = arcade.gui.UITextureButton(text="Выход", width=225,
+                                              texture=ResourceManager.button,
+                                              texture_hovered=ResourceManager.hover_button,
+                                              style=button_style)
         quit_btn.on_click = self.on_click_quit
+        self.v_box.add(quit_btn)
 
         self.anchor_layout.add(anchor_x="left", anchor_y="center_y", align_x=55, align_y=-50, child=self.v_box)
 
+class SaveListView(arcade.View):
+    def __init__(self, main_menu_view, cur_frame):
+        super().__init__()
+        self.main_menu_view = main_menu_view
+        self.manager = arcade.gui.UIManager()
+        self.manager.enable()
+        self.v_box = arcade.gui.UIBoxLayout(space_between=10)
+
+        # Стиль кнопок
+        button_style = {
+            "normal": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.WHITE, "anchor_x": "right"},
+            "hover": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.LIME_GREEN},
+            "press": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.MALACHITE}
+        }
+
+        # Получаем данные из БД
+        saves = database.get_recent_saves()
+
+        if not saves:
+            self.v_box.add(arcade.gui.UILabel(text="НЕТ СОХРАНЕНИЙ", font_size=20, color=arcade.color.GRAY))
+        else:
+            for s_id, name, time_str in saves:
+                # Создаем кнопку для каждого сохранения
+                btn_text = f"{name} ({time_str})"
+                btn = arcade.gui.UITextureButton(text=btn_text, width=385, height=100,
+                                                 texture=ResourceManager.button,
+                                                 texture_hovered=ResourceManager.hover_button,
+                                                 style=button_style)
+                btn.place_text(anchor_x='right', align_x=-25)
+
+                @btn.event("on_click")
+                def on_click_save(event, save_id=s_id, name=name, time=time_str):
+                    self.load_game(save_id, name, time)
+
+                self.v_box.add(btn)
+
+        # Кнопка Назад
+        back_btn = arcade.gui.UITextureButton(text="Назад", width=200,
+                                              texture=ResourceManager.button,
+                                              texture_hovered=ResourceManager.hover_button,
+                                              style=button_style)
+        back_btn.on_click = self.on_click_quit
+        self.v_box.add(back_btn)
+
+        # Центрируем всё
+        self.anchor = arcade.gui.UIAnchorLayout()
+        self.anchor.add(anchor_x="center_x", anchor_y="center_y", child=self.v_box)
+        self.manager.add(self.anchor)
+        self.anim_timer = 0
+        self.current_frame = cur_frame
+
+    def on_click_quit(self, event):
+        self.manager.disable()
+        self.window.show_view(self.main_menu_view)
+
+    def load_game(self, save_id, name, time):
+        data = database.load_game_state(save_id)
+        if data:
+            self.manager.disable()
+            game_view = GameView(name, time)
+            game_view.setup(load_data=data)
+            arcade.stop_sound(self.main_menu_view.start_player)
+            self.main_menu_view.select_save = False
+            self.window.show_view(game_view)
+
+    def on_show_view(self):
+        arcade.set_background_color(arcade.color.BLACK)
+
+    def on_draw(self):
+        self.clear()
+        if ResourceManager.start_frames:
+            texture = ResourceManager.start_frames[self.current_frame]
+            arcade.draw_texture_rect(texture, arcade.rect.LBWH(0, 0, self.width, self.height))
+        self.manager.draw()
+    def on_update(self, delta_time):
+        if ResourceManager.start_frames:
+            self.anim_timer += delta_time
+            if self.anim_timer > 0.065:
+                self.anim_timer = 0
+                self.current_frame = (self.current_frame + 1) % len(ResourceManager.start_frames)
+                self.main_menu_view.current_frame = (self.current_frame + 1) % len(ResourceManager.start_frames)
 
 class GameOverView(arcade.View):
     def __init__(self):
@@ -213,6 +305,7 @@ class BarView(arcade.View):
         self.physics_engine = None
         self.camera = None
         self.scale = 3.2
+        self.effect_manager = EffectManager()
         self.map_width = 15 * (30 * self.scale)
         self.map_height = 10 * (30 * self.scale)
 
@@ -251,7 +344,7 @@ class BarView(arcade.View):
         self.player_sprite.name = self.game_view.selected_unit.name
         self.player_sprite.active_effects = self.game_view.selected_unit.active_effects
         self.player_sprite.abilities = self.game_view.selected_unit.abilities
-        self.player_sprite.width, self.player_sprite.height = (70, 90)
+        self.player_sprite.width, self.player_sprite.height = (90, 90)
         self.player_sprite.center_x = 200
         self.player_sprite.center_y = 200
         self.scene.add_sprite("Player", self.player_sprite)
@@ -271,6 +364,7 @@ class BarView(arcade.View):
         self.clear()
         self.camera.use()
         self.scene.draw()
+        self.effect_manager.draw()
 
         # Рисуем ценники над предметами
         for item in self.items_list:
@@ -299,7 +393,7 @@ class BarView(arcade.View):
                                                                              self.map_width - self.player_sprite.width // 2))
         self.player_sprite.center_y = max(self.player_sprite.height // 2, min(self.player_sprite.center_y,
                                                                               self.map_height - self.player_sprite.height // 2))
-
+        self.effect_manager.update(delta_time)
         # Слежение камеры с ограничением
         new_camera_x = max(self.camera.viewport_width // 2,
                            min(self.player_sprite.center_x, self.map_width - self.camera.viewport_width // 2))
@@ -351,6 +445,7 @@ class BarView(arcade.View):
                         self.game_view.coins = current_coins - cost
                         buyer = self.game_view.selected_unit
                         if buyer:
+                            self.effect_manager.add_buy_effect(item.center_x, item.center_y)
                             buyer.equip_item(item)
                             print("Предмет куплен!")
                             # Удаляем предмет
@@ -373,7 +468,7 @@ class BarView(arcade.View):
 
 
 class GameView(arcade.View):
-    def __init__(self):
+    def __init__(self, name='not_named', time=''):
         super().__init__()
         self.map_seed = None  # Для сохранения
         self.tile_list = None
@@ -390,6 +485,8 @@ class GameView(arcade.View):
         self.selected_unit = None
         self.turn_state = PLAYER_TURN
         self.pending_buffs = []
+        self.name = name
+        self.time_of_creation = time
         arcade.set_background_color(arcade.color.BLACK)
 
     def on_show_view(self):
@@ -531,6 +628,7 @@ class GameView(arcade.View):
                 self.success = False
                 return
             self.success = True
+            self.time_of_creation = str(datetime.datetime.now())[:-7]
             positions = [
                 (spawn_point.position[0] - TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
                 (spawn_point.position[0] + TILE_SIZE, spawn_point.position[1] - TILE_SIZE),
@@ -665,10 +763,11 @@ class GameView(arcade.View):
         self.turn_state = ENEMY_MOVING
 
     def on_key_press(self, key, modifiers):
-        a, b = self.selected_unit.center_x // TILE_SIZE, self.selected_unit.center_y // TILE_SIZE
         # Сохранение по F5
         if key == arcade.key.F5:
-            database.save_game_state(self.map_seed, self.heroes_list, self.enemy_list, self.lairs_list)
+            database.save_game_state({'seed':self.map_seed, 'name': self.name,
+                                      'time_of_creation': self.time_of_creation},
+                                     self.heroes_list, self.enemy_list, self.lairs_list)
             return
 
         if self.turn_state != PLAYER_TURN:
@@ -694,6 +793,9 @@ class GameView(arcade.View):
                     arcade.stop_sound(self.background_music_player)
                     bar_view.setup()
                     self.window.show_view(bar_view)
+        elif key == arcade.key.ESCAPE:
+            arcade.stop_sound(self.background_music_player)
+            self.window.show_view(StartView())
 
     def on_key_release(self, key, modifiers):
         if key in [arcade.key.UP, arcade.key.DOWN]:
@@ -785,7 +887,7 @@ class GameView(arcade.View):
                         if c >= 6:
                             break
                         if ((dx == 0 and dy == 0) or arcade.get_sprites_at_point(
-                                ((lx + dx) * TILE_SIZE + 42, (ly + dy) * TILE_SIZE + 42), self.entity_list)):
+                                ((lx + dx) * TILE_SIZE + 40, (ly + dy) * TILE_SIZE + 40), self.entity_list)):
                             continue
                         self.spawn_enemy(lx + dx, ly + dy, is_guardian=True)
                         c += 1
@@ -793,7 +895,7 @@ class GameView(arcade.View):
             if lair.guardians_needed <= 0:
                 lair.kill()
                 self.lairs_list.remove(lair)
-                self.coins += 10
+                self.coins += 30
 
         # Смерть
         for entity in self.entity_list:
@@ -806,15 +908,17 @@ class GameView(arcade.View):
                             min_d = d; n_lair = l
                     if n_lair:
                         n_lair.guardians_needed -= 1
-                entity.kill()
+
                 if entity in self.heroes_list:
                     self.heroes_list.remove(entity)
                     self.coins -= self.coins // len(self.heroes_list) if len(self.heroes_list) > 0 else 0
                 if entity in self.enemy_list:
                     self.enemy_list.remove(entity)
-                    self.coins += 3 if getattr(entity, 'is_guardian', False) else 1
-            elif entity.get_stat('hp')[-1] > entity.get_stat('max_hp')[0]:
-                entity['hp'] = entity.get_stat('max_hp')[0] + entity.get_stat('hp')[1]
+                    self.coins += 10 if getattr(entity, 'is_guardian', False) else 5
+                    print(self.coins)
+                entity.kill()
+            elif entity['hp'] > entity.get_stat('max_hp')[0]:
+                entity['hp'] = entity.get_stat('max_hp')[0]
 
     def on_draw(self):
         self.clear()
@@ -847,8 +951,6 @@ class GameView(arcade.View):
         print("Конец хода игрока.")
         for entity in self.entity_list:
             entity.update_effects_turn()
-            if entity['hp'] > entity.get_stat('max_hp')[0]:
-                entity['hp'] = entity.get_stat('max_hp')[0]  # ограничиваем хп
             entity['mana'] = entity.get_stat('max_mana')[0]
         for lair in self.lairs_list:
             lair.next_spawn_interval -= 1
@@ -928,6 +1030,3 @@ class GameView(arcade.View):
         self.selected_unit.selected_ability = None  # убираем выбранную способность (уже использовали или пошли)
         if all(u.get_stat('moves_left')[0] <= 0 for u in self.heroes_list):
             self.end_turn()
-
-
-
