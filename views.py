@@ -1,11 +1,10 @@
 import datetime
 import arcade
+from entities import NPC
 from arcade.gui import UIManager
 from arcade.gui.widgets.layout import UIAnchorLayout
 import random
 import math
-
-from arcade.gui.widgets.text import UIInputTextStyle
 from perlin_noise import PerlinNoise
 from constants import *
 from entities import Entity, Lair, ShopItem
@@ -52,6 +51,20 @@ class ResourceManager:
         except:
             cls.button = arcade.load_texture(':resources:/gui_basic_assets/button/red_normal.png')
             cls.hover_button = arcade.load_texture(':resources:/gui_basic_assets/button/red_hover.png')
+        try:
+            conn = database.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""SELECT name, image_path, price, stats_json, abilities_json FROM items""")
+            rows = cursor.fetchall()
+            ITEMS_DB = []
+            for row in rows:
+                ITEMS_DB.append({'name': row[0], 'image_path': row[1], 'price': row[2],
+                                 'stats_json': row[3], 'abilities': row[4]})
+            conn.close()
+
+        except:
+            pass
+
         cls.loaded = True
 
 
@@ -105,13 +118,19 @@ class StartView(arcade.View):
 
     def on_click_new_game(self, event):
         self.manager.disable()
-        game_view = GameView(self.input_text.text.strip() if self.input_text.text.strip() else 'not_named')
-        game_view.setup(load_data=None)  # Новая игра
-        if game_view.success:
-            arcade.stop_sound(self.start_player)
-            self.window.show_view(game_view)
+        if not self.input_text.text.strip():
+            self.input_text.text = 'Название некорректно'
+        elif len(self.input_text.text) > 15:
+            self.input_text.text = 'В названии >15 символов'
         else:
-            self.manager.enable()
+            game_view = GameView(self.input_text.text.strip())
+            game_view.setup(load_data=None)  # Новая игра
+            if game_view.success:
+                arcade.stop_sound(self.start_player)
+                self.window.show_view(game_view)
+                return
+        self.input_text._border_color = arcade.color.RED
+        self.manager.enable()
 
     def on_click_quit(self, event):
         arcade.exit()
@@ -147,7 +166,9 @@ class StartView(arcade.View):
             "hover": {"font_name": ("Arial",), "font_size": 16, "font_color": arcade.color.MALACHITE},
             "press": {"font_name": ("Arial",), "font_size": 16, "font_color": arcade.color.MALACHITE}
         }
-        self.input_text = arcade.gui.UIInputText(width=200, text="Введите название мира")
+
+        self.v_box.add(arcade.gui.UILabel(text="Введите название мира:", font_size=16))
+        self.input_text = arcade.gui.UIInputText(width=225, height=30, border_color=arcade.color.MALACHITE)
         self.v_box.add(self.input_text)
 
         continue_btn = arcade.gui.UITextureButton(text="Продолжить", width=225,
@@ -185,7 +206,7 @@ class SaveListView(arcade.View):
 
         # Стиль кнопок
         button_style = {
-            "normal": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.WHITE, "anchor_x": "right"},
+            "normal": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.WHITE},
             "hover": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.LIME_GREEN},
             "press": {"font_name": ("Arial",), "font_size": 14, "font_color": arcade.color.MALACHITE}
         }
@@ -194,12 +215,12 @@ class SaveListView(arcade.View):
         saves = database.get_recent_saves()
 
         if not saves:
-            self.v_box.add(arcade.gui.UILabel(text="НЕТ СОХРАНЕНИЙ", font_size=20, color=arcade.color.GRAY))
+            self.v_box.add(arcade.gui.UILabel(text="НЕТ СОХРАНЕНИЙ", font_size=42, text_color=arcade.color.RUBY))
         else:
             for s_id, name, time_str in saves:
                 # Создаем кнопку для каждого сохранения
-                btn_text = f"{name} ({time_str})"
-                btn = arcade.gui.UITextureButton(text=btn_text, width=385, height=100,
+                btn_text = f"{name}({time_str})"
+                btn = arcade.gui.UITextureButton(text=btn_text, width=435, height=100,
                                                  texture=ResourceManager.button,
                                                  texture_hovered=ResourceManager.hover_button,
                                                  style=button_style)
@@ -210,7 +231,6 @@ class SaveListView(arcade.View):
                     self.load_game(save_id, name, time)
 
                 self.v_box.add(btn)
-
         # Кнопка Назад
         back_btn = arcade.gui.UITextureButton(text="Назад", width=200,
                                               texture=ResourceManager.button,
@@ -337,9 +357,26 @@ class BarView(arcade.View):
             return
         self.scene.add_sprite_list("ShopItems", sprite_list=self.items_list)
 
+        self.npc_list = arcade.SpriteList()
+
+        if "npc" in self.scene._name_mapping:
+            npc_layer = [*self.scene.get_sprite_list("npc")]
+            for i, tile_obj in enumerate(npc_layer):
+                try:
+                    data = NPC_DB[i]
+                    npc = NPC(data, tile_obj.center_x, tile_obj.center_y, self.scale)
+                    self.npc_list.append(npc)
+                    self.all_list.append(npc)
+                except:
+                    pass
+
+        self.scene.add_sprite_list("NPCs", sprite_list=self.npc_list)
+
+        self.near_npc = None
+        self.npc_phrase = ''
 
         # Игрок
-        self.player_sprite = Entity(self.game_view.selected_unit.image_path,'None',
+        self.player_sprite = Entity(self.game_view.selected_unit.image_path,'bar_hero',
                              stats_dict=self.game_view.selected_unit.stats_dict)
         self.player_sprite.name = self.game_view.selected_unit.name
         self.player_sprite.active_effects = self.game_view.selected_unit.active_effects
@@ -351,11 +388,8 @@ class BarView(arcade.View):
         self.all_list.append(self.player_sprite)
 
         # Физика
-        self.physics_engine = arcade.PhysicsEngineSimple(
-            self.player_sprite,
-            walls=[self.scene["collisions"],
-                   self.items_list] if "collisions" in self.scene._name_mapping else self.items_list
-        )
+        self.physics_engine = arcade.PhysicsEngineSimple(self.player_sprite,
+            walls=[self.scene["collisions"], self.items_list, self.npc_list])
 
     def on_show_view(self):
         self.bar_player = ResourceManager.bar_music.play(volume=0.55,loop=True)
@@ -364,6 +398,36 @@ class BarView(arcade.View):
         self.clear()
         self.camera.use()
         self.scene.draw()
+        if self.near_npc and self.npc_phrase:
+            text = self.npc_phrase
+            padding = 10
+            font_size = 14
+
+            # Размер текста
+            text_width = arcade.create_text_sprite(text, arcade.color.BLACK, font_size).width
+            text_height = font_size + 4
+
+            x = self.near_npc.center_x
+            y = self.near_npc.top + 20
+
+            # Белый фон
+            arcade.draw_rect_filled(arcade.rect.XYWH(
+                x,
+                y,
+                text_width + padding * 2,
+                text_height + padding,
+            ), arcade.color.WHITE)
+
+            # Текст
+            arcade.draw_text(
+                text,
+                x,
+                y,
+                arcade.color.BLACK,
+                font_size,
+                anchor_x="center",
+                anchor_y="center"
+            )
         self.effect_manager.draw()
 
         # Рисуем ценники над предметами
@@ -383,6 +447,14 @@ class BarView(arcade.View):
         coins = getattr(self.game_view, 'coins', 0)
         arcade.draw_text(f"Золото: {coins}", SCREEN_WIDTH - 20, SCREEN_HEIGHT - 20,
                          arcade.color.GOLD, 20, anchor_x="right", anchor_y="top")
+
+        if self.game_view.active_quest:
+            q = self.game_view.active_quest
+            arcade.draw_text(
+                f"Квест: {q['text']} ({q['progress']}/{q['target']})",
+                x=SCREEN_WIDTH // 2, y=SCREEN_HEIGHT - 40,
+                width=250, multiline=True, font_size=24, anchor_x='center'
+            )
 
         self.ui_overlay.draw()
 
@@ -404,7 +476,18 @@ class BarView(arcade.View):
 
         if self.ui_overlay.visible:
             self.ui_overlay.update(delta_time)
-
+        closest = arcade.get_closest_sprite(self.player_sprite, self.npc_list)
+        if closest:
+            npc, dist = closest
+            if not self.npc_phrase:
+                self.npc_phrase = npc.get_random_phrase()
+            if dist < (30 * self.scale) * 1.3:
+                phrase = npc.get_random_phrase(delta_time)
+                self.npc_phrase = phrase if phrase else self.npc_phrase
+                self.near_npc = npc
+            else:
+                self.npc_phrase = ''
+                self.near_npc = None
     def on_mouse_press(self, x, y, button, modifiers):
 
         # Преобразуем координаты мыши в координаты мира
@@ -433,6 +516,21 @@ class BarView(arcade.View):
         elif key == arcade.key.D:
             self.player_sprite.change_x = PLAYER_BAR_SPEED
         if key == arcade.key.E:
+            if self.near_npc:
+                # Если квеста ещё нет
+                if not self.game_view.active_quest:
+                    q = self.near_npc.get_random_quest()
+                    if q:
+                        # Клонируем и добавляем прогресс
+                        quest = dict(q)
+                        quest["progress"] = 0
+                        self.game_view.active_quest = quest
+                        print("Получен квест:", quest["text"])
+                        self.npc_phrase = "Удачной дороги!"
+                    return
+                else:
+                    self.npc_phrase = "У тебя уже есть задание."
+                    return
             # Ищем предметы рядом с игроком
             closest_item = arcade.get_closest_sprite(self.player_sprite, self.items_list)
             if closest_item:
@@ -446,7 +544,8 @@ class BarView(arcade.View):
                         buyer = self.game_view.selected_unit
                         if buyer:
                             self.effect_manager.add_buy_effect(item.center_x, item.center_y)
-                            buyer.equip_item(item)
+                            self.player_sprite.equip_item(item)  # применяем к временному персонажу в баре
+                            buyer.equip_item(item)  # применяем к основному персонажу
                             print("Предмет куплен!")
                             # Удаляем предмет
                             item.remove_from_sprite_lists()
@@ -484,6 +583,8 @@ class GameView(arcade.View):
         self.current_unit_index = 0
         self.selected_unit = None
         self.turn_state = PLAYER_TURN
+        self.active_quest = None
+        self.reputation = 0
         self.pending_buffs = []
         self.name = name
         self.time_of_creation = time
@@ -507,7 +608,11 @@ class GameView(arcade.View):
 
         # 1. Генерация карты (из сохранения или новая)
         if load_data:
-            self.map_seed = load_data['seed']
+            self.map_seed = load_data['world']['seed']
+            self.coins = load_data['world']['coins']
+            self.reputation = load_data['world']['rep']
+            self.active_quest = load_data['world']['quest']
+
             random.seed(self.map_seed)  # Восстанавливаем рандом для карты
         else:
             self.map_seed = random.randint(1, 100000)
@@ -595,6 +700,7 @@ class GameView(arcade.View):
                     hero.name = ent_data['name']
                     hero.active_effects = ent_data['effects']
                     hero.abilities = ent_data['abilities']
+                    hero.inventory = ent_data['inventory']
                     hero.center_x, hero.center_y = ent_data['x'], ent_data['y']
                     self.entity_list.append(hero)
                     self.heroes_list.append(hero)
@@ -604,6 +710,7 @@ class GameView(arcade.View):
                     enemy.name = ent_data['name']
                     enemy.active_effects = ent_data['effects']
                     enemy.abilities = ent_data['abilities']
+                    enemy.inventory = ent_data['inventory']
                     enemy.is_guardian = is_guardian
                     enemy.center_x, enemy.center_y = ent_data['x'], ent_data['y']
                     self.entity_list.append(enemy)
@@ -766,7 +873,8 @@ class GameView(arcade.View):
         # Сохранение по F5
         if key == arcade.key.F5:
             database.save_game_state({'seed':self.map_seed, 'name': self.name,
-                                      'time_of_creation': self.time_of_creation},
+                                      'time_of_creation': self.time_of_creation,
+                                      'coins': self.coins, 'rep': self.reputation, 'quest': self.active_quest},
                                      self.heroes_list, self.enemy_list, self.lairs_list)
             return
 
@@ -896,6 +1004,9 @@ class GameView(arcade.View):
                 lair.kill()
                 self.lairs_list.remove(lair)
                 self.coins += 30
+                if self.active_quest and self.active_quest["type"] == "kill_lair":
+                    self.active_quest["progress"] += 1
+                    self.check_quest_complete()
 
         # Смерть
         for entity in self.entity_list:
@@ -915,7 +1026,9 @@ class GameView(arcade.View):
                 if entity in self.enemy_list:
                     self.enemy_list.remove(entity)
                     self.coins += 10 if getattr(entity, 'is_guardian', False) else 5
-                    print(self.coins)
+                    if self.active_quest and self.active_quest["type"] == "kill_enemies":
+                        self.active_quest["progress"] += 1
+                        self.check_quest_complete()
                 entity.kill()
             elif entity['hp'] > entity.get_stat('max_hp')[0]:
                 entity['hp'] = entity.get_stat('max_hp')[0]
@@ -930,6 +1043,24 @@ class GameView(arcade.View):
                              anchor_x="center")
         self.effect_manager.draw()
         self.fog_list.draw()
+        if self.active_quest:
+            q = self.active_quest
+            arcade.draw_text(
+                f"Квест: {q['text']} ({q['progress']}/{q['target']})",
+                x=self.camera.position[0], y=self.camera.position[1] + SCREEN_HEIGHT // 2 - 40,
+                width=250, multiline=True, font_size=24, anchor_x='center'
+            )
+        arcade.draw_text(
+            f"Монеты: {self.coins}",
+            x=self.camera.position[0], y=self.camera.position[1] - SCREEN_HEIGHT // 2 + 25, color=arcade.color.GOLD,
+            font_size=24, anchor_x='center'
+        )
+        arcade.draw_text(
+            f"Репутация: {self.reputation}",
+            x=self.camera.position[0], y=self.camera.position[1] - SCREEN_HEIGHT // 2 + 60,
+            color=arcade.color.RED if self.reputation < 35 else arcade.color.GREEN,
+            font_size=24, anchor_x='center'
+        )
         self.ui_camera.use()
         self.char_info_overlay.draw()
 
@@ -969,6 +1100,18 @@ class GameView(arcade.View):
                                 c += 1
         self.turn_state = ENEMY_CALCULATING
 
+    def check_quest_complete(self):
+        q = self.active_quest
+        if not q:
+            return
+        if q["progress"] >= q["target"]:
+            print("Квест выполнен:", q["text"])
+            self.coins += q["reward_coins"]
+            self.reputation += q["reward_rep"]
+            print(f"Награда: {q['reward_coins']} золота, {q['reward_rep']} репутации")
+
+            self.active_quest = None
+
     def on_mouse_press(self, x, y, button, modifiers):
         if self.turn_state != PLAYER_TURN:
             return
@@ -1000,11 +1143,11 @@ class GameView(arcade.View):
                 if not self.selected_unit.selected_ability:
                     self.selected_unit = target
                     self.current_unit_index = self.heroes_list.index(target)
-                elif dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
+                elif dist // TILE_SIZE <= active_hero['attack_range'] and active_hero.get_stat('moves_left')[0] > 0:
                     apply_ability(self.selected_unit, target, self.selected_unit.selected_ability, self.effect_manager)
                     active_hero['moves_left'] -= 1
             elif target.role == 'enemy':
-                if dist // TILE_SIZE < active_hero['move_range'] and active_hero.get_stat('moves_left')[0] > 0:
+                if dist // TILE_SIZE <= active_hero['attack_range'] and active_hero.get_stat('moves_left')[0] > 0:
                     if active_hero.selected_ability:
                         apply_ability(active_hero, target, active_hero.selected_ability, self.effect_manager)
                         active_hero['moves_left'] -= 1
@@ -1020,7 +1163,7 @@ class GameView(arcade.View):
                 end_gy = int(tile.center_y // TILE_SIZE)
                 dist = abs(end_gx - start_gx) + abs(end_gy - start_gy)
 
-                if active_hero.get_stat('moves_left')[0] > 0 and dist <= active_hero.get_stat('move_range')[0]:
+                if active_hero.get_stat('moves_left')[0] > 0 and dist <= active_hero.get_stat('attack_range')[0]:
                     path = bfs_path((start_gx, start_gy), (end_gx, end_gy))
                     for sx, sy in path:
                         world_x = sx * TILE_SIZE + TILE_SIZE / 2

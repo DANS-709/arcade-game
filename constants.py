@@ -27,21 +27,19 @@ EXTEND_PARAMS = {
     'mana': 'max_mana',
     'moves_count': '3',
     'moves_left': 'moves_count',
-    'damage_deal': '0',
     'view_range': '4',
     'move_range': '3',
-    'attack_range': '3',
-    'armor': '0',      # Плоская защита (вычитается из урона)
-    'defense': '0'     # Процентная защита (снижает урон на %)
-}
+    'attack_range': '3'}
+
 
 ITEMS_DB = [{
         "name": "Меч",
         "image": "images/sword.png",
         "price": 175,
-        "stats": {"armor": 1},
+        "stats": {},
         "abilities": [
-            {"name": "Удар эфесом", "effect": "target['hp'] -= 8; buff('target', 'defense', -10, 2)", "description": "Наносит 8 урона и снижает защиту."}
+            {"name": "Удар эфесом", "effect": "target['hp'] -= 8; buff('target', 'max_hp', -2, 3)",
+             "description": "Наносит 8 урона и снижает защиту."}
         ]
     },
     {
@@ -61,16 +59,44 @@ ITEMS_DB = [{
     }
 ]
 
+NPC_DB = [
+    {
+        "name": "Sir Aldric",
+        "image": "images/barmen.png",
+        "phrases": [
+            "Поможешь нам с чудищами?",
+            "Дороги стали опасны...",
+            "Нужен кто-то смелый для работы."
+        ],
+        "quests": [
+            {
+                "type": "kill_lair",
+                "target": 1,          # сколько логов уничтожить
+                "reward_coins": 65,
+                "reward_rep": 70,
+                "text": "Уничтожь одно логово поблизости."
+            },
+            {
+                "type": "kill_enemies",
+                "target": 5,          # сколько врагов
+                "reward_coins": 30,
+                "reward_rep": 30,
+                "text": "Разберись с пятью монстрами вокруг города."
+            }
+        ]
+    }
+]
+
 
 GUARD_JSON = {
     "name": "guard",
-    "race": ["ancient","hero['moves_range'] = 6"],
-    "class": ["protector", "buff('hero', 'hp', 10, 5); hero['armor'] = 2"],
-    "stats": {"dex": 2, "str": 1, "int": 6, "cha": 7},
+    "race": ["ancient","hero['move_range'] = 5"],
+    "class": ["protector", "buff('hero', 'hp', 3, 3)"],
+    "stats": {"dex": 2, "str": 7, "int": 6, "cha": -3},
     "level": 1,
-    "hp": 30,
+    "hp": 12,
     "abilities": [
-        {"name": "обычный удар", "effect": "target['hp'] -= 3; buff('hero', 'hp', 1, 2)",
+        {"name": "обычный удар", "effect": "target['hp'] -= 1 + d4; buff('hero', 'hp', 1, 2)",
          "description": "Наносит урон врагу, получая небольшой бафф."},
         {"name": "Удар с воздуха",
          "effect": "buff('target', 'max_hp', -3, 2);target['hp'] -= 7;hero['hp'] -= 5; buff('hero', 'hp', -2, 1)",
@@ -80,11 +106,12 @@ GUARD_JSON = {
 }
 ENEMY_JSON = {"name": "spooky scary sceleton",
     "race": ["sceleton","buff('hero', 'move_range', -1, 2)"],
-    "class": ["warrior","buff('hero', 'hp', -5, 2)"],
-    "stats": {"dex": 2, "str": 1, "int": 2, "cha": -3},
+    "class": ["warrior","buff('hero', 'hp', -3, 2)"],
+    "stats": {"dex": -2, "str": 1, "int": 2, "cha": -3},
     "level": 1,
-    "hp": 15,
+    "hp": 10,
     "abilities": [
-        {"name": "удар мечом", "effect": "target['hp'] -= 3", "description": "Наносит рубящий удар мечом по врагу."}
+        {"name": "удар мечом", "effect": "target['hp'] -= 4 + hero['dex'] + hero['str']",
+         "description": "Наносит рубящий удар мечом по врагу."}
     ],
-    "image_b64": "" } # Пусто, загрузится дефолтная}
+    "image_b64": "" } # Пусто, загрузится дефолтная

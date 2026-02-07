@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="15" height="10" tilewidth="30" tileheight="30" infinite="0" nextlayerid="5" nextobjectid="1">
+<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="15" height="10" tilewidth="30" tileheight="30" infinite="0" nextlayerid="6" nextobjectid="1">
  <tileset firstgid="1" source="tiled_bar1.tsx"/>
- <layer id="3" name="collisions" width="15" height="10" opacity="0">
+ <layer id="3" name="collisions" width="15" height="10" visible="0" opacity="0">
   <data encoding="base64" compression="zlib">
    eJxjYIAAZgZUwIxE48K4ADMaTQrApQeXvchi6G4mxR58/sNlHqn+Iyc8COnFFze4aGx6cdlHjF5sGACwuACj
   </data>
@@ -13,7 +13,12 @@
  </layer>
  <layer id="4" name="items" width="15" height="10" visible="0">
   <data encoding="base64" compression="zlib">
-   eJxjYKA/qBkgs2lp71AH2MKGkvACAJ7mAm0=
+   eJxjYKA/qBkAOwfS3qEAsIUNJeEFAOD3AfE=
+  </data>
+ </layer>
+ <layer id="5" name="npc" width="15" height="10" visible="0">
+  <data encoding="base64" compression="zlib">
+   eJxjYBhewH6gHTAKwAAAYtAAQA==
   </data>
  </layer>
 </map>

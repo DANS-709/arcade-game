@@ -18,7 +18,9 @@ def init_db():
             map_seed INTEGER,
             name TEXT,
             time_of_creation TEXT,
-            duration_of_game TEXT
+            coins INTEGER,
+            reputation INTEGER,
+            quest  TEXT
         )
     ''')
 
@@ -103,12 +105,15 @@ def save_game_state(world, heroes, enemies, lairs):
         # Очищаем старые данные сущностей и логов для этого ID
         cursor.execute('DELETE FROM entities WHERE map_id = ?', (save_id,))
         cursor.execute('DELETE FROM lairs WHERE map_id = ?', (save_id,))
+        cursor.execute('DELETE FROM inventory WHERE map_id = ?', (save_id,))
         # Обновляем сид (на всякий случай)
         cursor.execute('UPDATE game_state SET map_seed = ? WHERE id = ?', (world.get('seed'), save_id))
     else:
         # Создаем новую запись
-        cursor.execute('INSERT INTO game_state (map_seed, name, time_of_creation) VALUES (?, ?, ?)',
-                       (world.get('seed'), name, time_created))
+        cursor.execute('''INSERT INTO game_state (map_seed, name, time_of_creation,
+         coins, reputation, quest) VALUES (?, ?, ?, ?, ?, ?)''',
+                       (world.get('seed'), name, time_created,
+                        world.get('coins'), world.get('rep'), json.dumps(world.get('quest'))))
         save_id = cursor.lastrowid
 
     # Сохраняем сущности
@@ -122,6 +127,23 @@ def save_game_state(world, heroes, enemies, lairs):
               json.dumps(entity.stats_dict), json.dumps(entity.active_effects),
               json.dumps(entity.abilities), 1 if getattr(entity, 'is_guardian', False) else 0,
               entity.image_path, save_id))
+        entity_db_id = cursor.lastrowid
+        for item in getattr(entity, 'inventory', []):
+            # 1. Добавляем предмет в справочник, если его там нет (по имени)
+            cursor.execute('''
+                        INSERT OR IGNORE INTO items (name, image_path, price, stats_json, abilities_json)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (item.name, item.image_path, getattr(item, 'price', 0),
+                          json.dumps(getattr(item, 'stats_dict', {})),
+                          json.dumps(getattr(item, 'abilities', []))))
+
+            # Получаем ID предмета
+            cursor.execute('SELECT id FROM items WHERE name = ?', (item.name,))
+            item_id = cursor.fetchone()[0]
+
+            # 2. Создаем связь в таблице inventory
+            cursor.execute('INSERT INTO inventory (entity_id, item_id) VALUES (?, ?)',
+                           (entity_db_id, item_id))
 
     for lair in lairs:
         cursor.execute('''
@@ -139,7 +161,8 @@ def get_recent_saves(limit=5):
     if not os.path.exists(DB_NAME): return []
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, name, time_of_creation FROM game_state ORDER BY id DESC LIMIT ?', (limit,))
+    cursor.execute('SELECT id, name, time_of_creation FROM game_state ORDER BY id DESC LIMIT ?',
+                   (limit,))
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -147,20 +170,44 @@ def get_recent_saves(limit=5):
 def load_game_state(save_id):
     conn = get_connection()
     cursor = conn.cursor()
+    world = dict()
 
-    cursor.execute('SELECT map_seed FROM game_state WHERE id = ?', (save_id,))
+    cursor.execute('SELECT map_seed, coins, reputation, quest FROM game_state WHERE id = ?', (save_id,))
     row = cursor.fetchone()
     if not row:
         conn.close()
         return None
-    seed = row[0]
+    world['seed'] = row[0]
+    world['coins'] = row[1]
+    world['rep'] = row[2]
+    world['quest'] = json.loads(row[3])
 
-    cursor.execute('SELECT name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path FROM entities WHERE map_id = ?', (save_id,))
-    entities_data = [{
-        'name': r[0], 'role': r[1], 'x': r[2], 'y': r[3],
-        'stats': json.loads(r[4]), 'effects': json.loads(r[5]),
-        'abilities': json.loads(r[6]), 'is_guardian': bool(r[7]), 'image_path': r[8]
-    } for r in cursor.fetchall()]
+    cursor.execute('''SELECT name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path
+     FROM entities WHERE map_id = ?''', (save_id,))
+    entities_rows = cursor.fetchall()
+    entities_data = []
+
+    for r in entities_rows:
+        entity_id = r[0]
+        # Для каждой сущности тянем её предметы через JOIN
+        cursor.execute('''
+                SELECT i.name, i.image_path, i.price, i.stats_json, i.abilities_json
+                FROM items i
+                JOIN inventory inv ON i.id = inv.item_id
+                WHERE inv.entity_id = ?
+            ''', (entity_id,))
+
+        items_data = [{
+            'name': ir[0], 'image_path': ir[1], 'price': ir[2],
+            'stats': json.loads(ir[3]), 'abilities': json.loads(ir[4])
+        } for ir in cursor.fetchall()]
+        entities_data.append({
+            'name': r[0], 'role': r[1], 'x': r[2], 'y': r[3],
+            'stats': json.loads(r[4]), 'effects': json.loads(r[5]),
+            'abilities': json.loads(r[6]), 'is_guardian': bool(r[7]),
+            'image_path': r[8],
+            'inventory': items_data  # Добавляем список предметов в данные сущности
+        })
 
     cursor.execute('SELECT x, y, guardians_needed, next_spawn_interval, guardians_spawned FROM lairs WHERE map_id = ?', (save_id,))
     lairs_data = [{
@@ -169,4 +216,4 @@ def load_game_state(save_id):
     } for r in cursor.fetchall()]
 
     conn.close()
-    return {'seed': seed, 'entities': entities_data, 'lairs': lairs_data}
+    return {'world': world, 'entities': entities_data, 'lairs': lairs_data}

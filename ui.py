@@ -21,6 +21,7 @@ class CharacterInfoOverlay:
 
         self.window = arcade.get_window()
 
+        # Кешируем фон и список элементов
         self.background_texture = arcade.load_texture('images/info_panel.jpg')
         self.ui_elements = []  # Здесь будем хранить объекты arcade.Text
         self.sprite_list = arcade.SpriteList()  # Для превью
@@ -78,7 +79,7 @@ class CharacterInfoOverlay:
         current_y -= 150
 
         # 3. Статы
-        if self.entity.role == 'hero':
+        if self.entity.role in ('hero', 'bar_hero'):
             stats_to_show = [
                 ("HP", f"{int(self.entity.get_stat('hp')[0])}/{int(self.entity.get_stat('max_hp')[0])}"),
                 ("Mana", f"{int(self.entity.get_stat('mana')[0])}/{int(self.entity.get_stat('max_mana')[0])}"),
@@ -95,7 +96,8 @@ class CharacterInfoOverlay:
 
         current_y -= 20
         # 4. Способности
-        self.ui_elements.append(arcade.Text("Способности:", content_x, current_y, arcade.color.GOLD, 18))
+        text = "Способности:" if self.entity.role != 'npc' else 'Квесты:'
+        self.ui_elements.append(arcade.Text(text, content_x + 10, current_y, arcade.color.GOLD, 18))
         current_y -= 30
 
         if hasattr(self.entity, 'abilities'):

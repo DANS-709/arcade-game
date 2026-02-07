@@ -40,11 +40,10 @@ class Entity(arcade.Sprite):
         self.anim_start_pos = None
         self.anim_timer = 0
         self.anim_duration = 0.2  # Длительность одной фазы в секундах
+        self.inventory = []
 
         # Анимация тряски (Урон)
         self.shake_timer = 0
-        self.shake_offset_x = 0
-        self.shake_offset_y = 0
 
         # Флаг для загрузки сохранения (чтобы не сбрасывать HP)
         is_loaded_from_save = stats_dict is not None and 'hp' in stats_dict
@@ -135,6 +134,7 @@ class Entity(arcade.Sprite):
         for stat, value in item.stats_dict.items():
             current_val = self.stats_dict.get(stat, 0)
             self.stats_dict[stat] = current_val + value
+            self.inventory.append(item)
 
         # 2. Добавляем способности
         if item.abilities:
@@ -142,18 +142,6 @@ class Entity(arcade.Sprite):
 
         print(f"{self.name} купил {item.name}!")
 
-    def draw(self, **kwargs):
-        # Временно смещаем координаты для отрисовки тряски
-        orig_x = self.center_x
-        orig_y = self.center_y
-        self.center_x += self.shake_offset_x
-        self.center_y += self.shake_offset_y
-
-        super().draw(**kwargs)
-
-        # Возвращаем назад
-        self.center_x = orig_x
-        self.center_y = orig_y
 
     def update_effects_turn(self):
         surviving_effects = []
@@ -203,11 +191,13 @@ class Entity(arcade.Sprite):
 
     def start_shake(self, duration=0.2):
         """ Запускает тряску спрайта """
+        self.orig_x = self.center_x
+        self.orig_y = self.center_y
         self.shake_timer = duration
 
     def update_animation_logic(self, delta_time):
         """ Обновляет логику смещений (вызывать в update) """
-        # Логика рывка (Lunge)
+        # Логика рывка
         if self.anim_phase:
             self.anim_timer += delta_time
             t = min(self.anim_timer / self.anim_duration, 1.0)
@@ -228,22 +218,55 @@ class Entity(arcade.Sprite):
                     self.center_x, self.center_y = self.anim_start_pos
         # Логика тряски (Shake)
         if self.shake_timer > 0:
+            self.center_x += random.uniform(-2, 2)
+            self.center_y += random.uniform(-2, 2)
             self.shake_timer -= delta_time
-            # Генерируем случайное смещение
-            self.shake_offset_x = random.uniform(-5, 5)
-            self.shake_offset_y = random.uniform(-5, 5)
-            if self.shake_timer <= 0:
-                self.shake_offset_x = 0
-                self.shake_offset_y = 0
+            if self.shake_timer < 0:
+                self.center_x = self.orig_x
+                self.center_y = self.orig_y
 
-    def receive_damage(self, raw_damage):
-        armor = self.get_stat('armor')[0]
-        defense_percent = max(100, self.get_stat('defense')[0])
-        reduced_damage = raw_damage * (1 - defense_percent // 100)
-        final_damage = max(0, reduced_damage - armor)
-        self.stats_dict['hp'] -= final_damage
-        return final_damage
+class NPC(arcade.Sprite):
+    def __init__(self, npc_data, x, y, scale):
+        self.name = npc_data.get("name", "NPC")
+        self.phrases = npc_data.get("phrases", [])
+        self.quests = npc_data.get("quests", [])
 
+        self.image_path = npc_data.get("image", "images/npc.png")
+        try:
+            super().__init__(self.image_path)
+        except:
+            super().__init__()
+            self.color = arcade.color.GRAY
+
+        self.width, self.height = (90, 90)
+        self.center_x = x
+        self.center_y = y
+        self.time_to_new_phrase = 5
+        self.time = 0
+        # Поля для совместимости с CharacterInfoOverlay
+        self.role = "npc"
+        self.stats_dict = {}
+        self.active_effects = []
+        self.abilities = [{'name': quest['type'],
+                          'effect': " ; ".join(['coins:' + str(quest['reward_coins']),
+                                                'rep:' + str(quest['reward_rep'])]),
+                          'description': quest['text']} for quest in npc_data['quests']]
+
+    def get_random_phrase(self, delta_time=0):
+        if not self.phrases:
+            return ""
+        if not delta_time:
+            return random.choice(self.phrases)
+        self.time += delta_time
+        if self.time > self.time_to_new_phrase:
+            self.time = 0
+            return random.choice(self.phrases)
+        return ""
+
+    def get_random_quest(self):
+        if not self.quests:
+            return None
+        return random.choice(self.quests)
 
 class ShopItem(arcade.Sprite):
     """ Предмет, который можно купить """
@@ -258,7 +281,7 @@ class ShopItem(arcade.Sprite):
         except:
             super().__init__()
             self.color = arcade.color.GOLD
-        self.width, self.height = 32 * scale, 32 * scale
+        self.width, self.height = 29 * scale, 29 * scale
 
         self.center_x = x
         self.center_y = y
