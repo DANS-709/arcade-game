@@ -74,7 +74,6 @@ class Entity(arcade.Sprite):
 
 
         # Применяем Race/Class только если это новая игра (не из сохранения)
-        # Или если нужно пересчитать бонусы. Для сохранения обычно сохраняют итоговые статы.
         if not skip_stats:
             if 'race' in data:
                 try:
@@ -229,6 +228,7 @@ class NPC(arcade.Sprite):
     def __init__(self, npc_data, x, y, scale):
         self.name = npc_data.get("name", "NPC")
         self.phrases = npc_data.get("phrases", [])
+        self.final_phrases = npc_data.get("final_phrases", [])
         self.quests = npc_data.get("quests", [])
 
         self.image_path = npc_data.get("image", "images/npc.png")
@@ -238,7 +238,7 @@ class NPC(arcade.Sprite):
             super().__init__()
             self.color = arcade.color.GRAY
 
-        self.width, self.height = (90, 90)
+        self.width, self.height = 29 * scale, 29 * scale
         self.center_x = x
         self.center_y = y
         self.time_to_new_phrase = 5
@@ -252,13 +252,18 @@ class NPC(arcade.Sprite):
                                                 'rep:' + str(quest['reward_rep'])]),
                           'description': quest['text']} for quest in npc_data['quests']]
 
-    def get_random_phrase(self, delta_time=0):
+    def get_random_phrase(self, game_view=None, delta_time=0):
         if not self.phrases:
             return ""
+        self.time += delta_time
+        if game_view and not delta_time:
+            return random.choice(self.final_phrases)
+        if game_view and game_view.final_quest_unlocked:
+            if self.final_phrases:
+                return random.choice(self.final_phrases)
         if not delta_time:
             return random.choice(self.phrases)
-        self.time += delta_time
-        if self.time > self.time_to_new_phrase:
+        elif self.time > self.time_to_new_phrase:
             self.time = 0
             return random.choice(self.phrases)
         return ""

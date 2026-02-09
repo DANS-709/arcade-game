@@ -79,13 +79,10 @@ class CharacterInfoOverlay:
         current_y -= 150
 
         # 3. Статы
-        if self.entity.role in ('hero', 'bar_hero'):
+        if self.entity.role in ('hero', 'bar_hero', 'enemy'):
             stats_to_show = [
                 ("HP", f"{int(self.entity.get_stat('hp')[0])}/{int(self.entity.get_stat('max_hp')[0])}"),
-                ("Mana", f"{int(self.entity.get_stat('mana')[0])}/{int(self.entity.get_stat('max_mana')[0])}"),
-                ("AP (ОД)", f"{self.entity.get_stat('moves_left')[0]}"),
-                ("Armor", f"{self.entity.get_stat('armor')[0]}"),
-                ("Defense", f"{self.entity.get_stat('defense')[0]}%"),
+                ("AP (ОД)", f"{self.entity.get_stat('moves_left')[0]}")
             ]
 
             for label, val in stats_to_show:

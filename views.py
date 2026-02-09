@@ -21,7 +21,8 @@ class ResourceManager:
 
     @classmethod
     def load_resources(cls):
-        if cls.loaded: return
+        if cls.loaded:
+            return
         try:
             for i in range(51):
                 filename = f"images/start_menu/start_menu_{i:03d}.jpg"
@@ -32,6 +33,7 @@ class ResourceManager:
             for i in range(51):
                 filename = f"images/lose_menu/lose_menu_{i:03d}.jpg"
                 cls.lose_frames.append(arcade.load_texture(filename))
+            cls.win_image = arcade.load_texture('images/win.png')
         except:
             pass
         # Загрузка звуков (заглушки при ошибке)
@@ -40,6 +42,8 @@ class ResourceManager:
             cls.lose_music = arcade.load_sound('sound/Giulio-Fazio-Wandering-Knight_lose_misic.mp3')
             cls.game_music = arcade.load_sound('sound/backgound_witcher.mp3')
             cls.bar_music = arcade.load_sound('sound/tavern_witcher.mp3')
+            cls.win_sound = arcade.load_sound('sound/mixkit-medieval-show-fanfare-announcement-226.wav')
+            cls.click_sound = arcade.load_sound('sound/click.mp3')
         except:
             cls.start_music = arcade.load_sound(':resources:/music/1918.mp3')
             cls.lose_music = arcade.load_sound(':resources:/music/1918.mp3')
@@ -112,12 +116,14 @@ class StartView(arcade.View):
 
     def on_click_continue(self, event):
         self.select_save = True
+        ResourceManager.click_sound.play()
         self.manager.disable()
         self.window.show_view(SaveListView(self, self.current_frame))
 
 
     def on_click_new_game(self, event):
         self.manager.disable()
+        ResourceManager.click_sound.play()
         if not self.input_text.text.strip():
             self.input_text.text = 'Название некорректно'
         elif len(self.input_text.text) > 15:
@@ -252,6 +258,7 @@ class SaveListView(arcade.View):
 
     def load_game(self, save_id, name, time):
         data = database.load_game_state(save_id)
+        ResourceManager.click_sound.play()
         if data:
             self.manager.disable()
             game_view = GameView(name, time)
@@ -277,20 +284,24 @@ class SaveListView(arcade.View):
                 self.current_frame = (self.current_frame + 1) % len(ResourceManager.start_frames)
                 self.main_menu_view.current_frame = (self.current_frame + 1) % len(ResourceManager.start_frames)
 
-class GameOverView(arcade.View):
-    def __init__(self):
+class GameEndView(arcade.View):
+    def __init__(self, win=False):
         super().__init__()
         self.view_camera = arcade.camera.Camera2D()
         self.current_frame = 0
+        self.win = win
         self.anim_timer = 0.0
 
 
     def on_show_view(self):
-        self.lose_player = ResourceManager.lose_music.play(loop=True, speed=0.75)
+        if not self.win:
+            self.player = ResourceManager.lose_music.play(loop=True, speed=0.75)
+        else:
+            self.player = ResourceManager.win_sound.play(volume=0.75)
         arcade.set_background_color(arcade.color.BLACK)
 
     def on_update(self, delta_time):
-        if ResourceManager.lose_frames:
+        if ResourceManager.lose_frames and not self.win:
             self.anim_timer += delta_time
             if self.anim_timer > 0.05:
                 self.anim_timer = 0
@@ -299,14 +310,18 @@ class GameOverView(arcade.View):
     def on_draw(self):
         self.clear()
         self.view_camera.use()
-        if ResourceManager.lose_frames:
+        if ResourceManager.lose_frames and not self.win:
             texture = ResourceManager.lose_frames[self.current_frame]
             arcade.draw_texture_rect(texture, arcade.rect.LBWH(0, 0, self.width, self.height))
+        elif self.win:
+            arcade.draw_texture_rect(ResourceManager.win_image,
+                                     arcade.rect.LBWH(0, 0, self.width, self.height))
         else:
-            arcade.draw_text("GAME OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, arcade.color.RED, 50, anchor_x="center")
+            arcade.draw_text("GAME END",
+                             SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, arcade.color.RED, 50, anchor_x="center")
 
     def on_key_press(self, symbol, modifiers):
-        arcade.stop_sound(self.lose_player)
+        arcade.stop_sound(self.player)
         self.window.show_view(StartView())
 
 class BarView(arcade.View):
@@ -479,10 +494,8 @@ class BarView(arcade.View):
         closest = arcade.get_closest_sprite(self.player_sprite, self.npc_list)
         if closest:
             npc, dist = closest
-            if not self.npc_phrase:
-                self.npc_phrase = npc.get_random_phrase()
             if dist < (30 * self.scale) * 1.3:
-                phrase = npc.get_random_phrase(delta_time)
+                phrase = npc.get_random_phrase(self.game_view, delta_time=delta_time)
                 self.npc_phrase = phrase if phrase else self.npc_phrase
                 self.near_npc = npc
             else:
@@ -517,20 +530,29 @@ class BarView(arcade.View):
             self.player_sprite.change_x = PLAYER_BAR_SPEED
         if key == arcade.key.E:
             if self.near_npc:
-                # Если квеста ещё нет
-                if not self.game_view.active_quest:
-                    q = self.near_npc.get_random_quest()
-                    if q:
-                        # Клонируем и добавляем прогресс
-                        quest = dict(q)
-                        quest["progress"] = 0
-                        self.game_view.active_quest = quest
-                        print("Получен квест:", quest["text"])
-                        self.npc_phrase = "Удачной дороги!"
-                    return
+                if self.game_view.active_quest and self.game_view.active_quest["type"] == "return_to_bar":
+                    print("Вы приняли финальный квест.")
+                    # Засчитываем "возврат в бар"
+                    self.game_view.active_quest["progress"] = 1
+                    self.game_view.check_quest_complete()
+
+                    # Спавним босса
+                    self.ui_overlay.hide()
+                    arcade.stop_sound(self.bar_player)
+                    self.window.show_view(self.game_view)
+                    self.game_view.spawn_boss()
                 else:
-                    self.npc_phrase = "У тебя уже есть задание."
-                    return
+                    # Обычные квесты как раньше
+                    if not self.game_view.active_quest:
+                        q = self.near_npc.get_random_quest()
+                        if q:
+                            quest = dict(q)
+                            quest["progress"] = 0
+                            self.game_view.active_quest = quest
+                            print("Получен квест:", quest["text"])
+                        return
+                    else:
+                        self.npc_phrase = "У тебя уже есть задание."
             # Ищем предметы рядом с игроком
             closest_item = arcade.get_closest_sprite(self.player_sprite, self.items_list)
             if closest_item:
@@ -583,8 +605,6 @@ class GameView(arcade.View):
         self.current_unit_index = 0
         self.selected_unit = None
         self.turn_state = PLAYER_TURN
-        self.active_quest = None
-        self.reputation = 0
         self.pending_buffs = []
         self.name = name
         self.time_of_creation = time
@@ -600,9 +620,15 @@ class GameView(arcade.View):
         self.heroes_list = arcade.SpriteList()
         self.fog_list = arcade.SpriteList()
         self.towns = arcade.SpriteList()
+        self.forests = arcade.SpriteList()
         self.ui_camera = arcade.camera.Camera2D()
         self.char_info_overlay = CharacterInfoOverlay()
         self.coins = 75
+        self.active_quest = None
+        self.reputation = 0
+        self.boss_spawned = False
+        self.boss_entity = None
+        self.final_quest_unlocked = False
         self.lairs_list = []
         self.camera = arcade.camera.Camera2D()
 
@@ -661,6 +687,8 @@ class GameView(arcade.View):
                     tile = arcade.Sprite(img_file)
                     if tile_type in ('bar', 'town'):
                         self.towns.append(tile)
+                    elif tile_type == 'forest':
+                        self.forests.append(tile)
                 except:
                     color = arcade.color.GREEN
                     if tile_type == 'town':
@@ -912,13 +940,9 @@ class GameView(arcade.View):
             self.camera_vel[0] = 0
 
     def on_update(self, delta_time):
-        if len(self.lairs_list) == 0:
-            print("ПОБЕДА!")
-            self.window.show_view(StartView())
-            return
-        elif len(self.heroes_list) == 0:
+        if len(self.heroes_list) == 0:
             arcade.stop_sound(self.background_music_player)
-            self.window.show_view(GameOverView())
+            self.window.show_view(GameEndView())
             return
         if self.char_info_overlay.visible:
             self.char_info_overlay.update(delta_time)
@@ -1011,6 +1035,11 @@ class GameView(arcade.View):
         # Смерть
         for entity in self.entity_list:
             if entity.get_stat('hp')[0] <= 0:
+                if entity == self.boss_entity:
+                    print("Босс повержен. Игра окончена.")
+                    arcade.stop_sound(self.background_music_player)
+                    self.window.show_view(GameEndView(win=True))
+                    return
                 if getattr(entity, 'is_guardian', False):
                     n_lair, min_d = None, float('inf')
                     for l in self.lairs_list:
@@ -1035,12 +1064,20 @@ class GameView(arcade.View):
 
     def on_draw(self):
         self.clear()
-        if self.camera: self.camera.use()
+        if self.camera:
+            self.camera.use()
         self.tile_list.draw()
         self.entity_list.draw()
         for lair in self.lairs_list:
             arcade.draw_text(f"{lair.guardians_needed}", lair.center_x, lair.center_y + 50, arcade.color.RED, 14,
                              anchor_x="center")
+        if self.selected_unit:
+            arcade.draw_rect_outline(arcade.rect.XYWH(
+                self.selected_unit.center_x,
+                self.selected_unit.center_y,
+                self.selected_unit.width,
+                self.selected_unit.height,
+            ), color=arcade.color.WHITE, border_width=3)
         self.effect_manager.draw()
         self.fog_list.draw()
         if self.active_quest:
@@ -1074,6 +1111,28 @@ class GameView(arcade.View):
         enemy.center_y = y_grid * TILE_SIZE + TILE_SIZE / 2
         self.entity_list.append(enemy)
         self.enemy_list.append(enemy)
+
+    def spawn_boss(self):
+        if self.boss_spawned:
+            return
+
+        total_hp = sum(h.get_stat('max_hp')[0] for h in self.heroes_list)
+        boss_data = BOSS_VAMPIRE.copy()
+        boss_data["hp"] = total_hp * 2
+
+        boss = Entity("images/vampire.png", "enemy", json_data=boss_data)
+        boss.is_guardian = False
+
+        # Ставим в рандомный лес
+        boss.position = random.choice(self.forests).position
+        self.active_quest = FINAL_FIGHT_QUEST
+        self.active_quest['progress'] = 0
+        self.entity_list.append(boss)
+        self.enemy_list.append(boss)
+
+        self.boss_entity = boss
+        self.boss_spawned = True
+        print("Босс появился:", boss_data.get("name"))
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         self.char_info_overlay.on_scroll(scroll_y)
@@ -1109,8 +1168,14 @@ class GameView(arcade.View):
             self.coins += q["reward_coins"]
             self.reputation += q["reward_rep"]
             print(f"Награда: {q['reward_coins']} золота, {q['reward_rep']} репутации")
-
-            self.active_quest = None
+            # Если репутация стала больше 100 — открываем финальный квест
+            if self.reputation > 100 and not self.final_quest_unlocked:
+                self.final_quest_unlocked = True
+                self.active_quest = FINAL_RETURN_QUEST
+                self.active_quest["progress"] = 0
+                print("Открыт финальный квест: Вернуться в бар")
+            else:
+                self.active_quest = None
 
     def on_mouse_press(self, x, y, button, modifiers):
         if self.turn_state != PLAYER_TURN:
@@ -1143,11 +1208,13 @@ class GameView(arcade.View):
                 if not self.selected_unit.selected_ability:
                     self.selected_unit = target
                     self.current_unit_index = self.heroes_list.index(target)
-                elif dist // TILE_SIZE <= active_hero['attack_range'] and active_hero.get_stat('moves_left')[0] > 0:
+                elif (dist // TILE_SIZE <= active_hero.get_stat('attack_range')[0]
+                      and active_hero.get_stat('moves_left')[0] > 0):
                     apply_ability(self.selected_unit, target, self.selected_unit.selected_ability, self.effect_manager)
                     active_hero['moves_left'] -= 1
             elif target.role == 'enemy':
-                if dist // TILE_SIZE <= active_hero['attack_range'] and active_hero.get_stat('moves_left')[0] > 0:
+                if (dist // TILE_SIZE <= active_hero.get_stat('attack_range')[0]
+                        and active_hero.get_stat('moves_left')[0] > 0):
                     if active_hero.selected_ability:
                         apply_ability(active_hero, target, active_hero.selected_ability, self.effect_manager)
                         active_hero['moves_left'] -= 1
@@ -1163,7 +1230,7 @@ class GameView(arcade.View):
                 end_gy = int(tile.center_y // TILE_SIZE)
                 dist = abs(end_gx - start_gx) + abs(end_gy - start_gy)
 
-                if active_hero.get_stat('moves_left')[0] > 0 and dist <= active_hero.get_stat('attack_range')[0]:
+                if active_hero.get_stat('moves_left')[0] > 0 and dist <= active_hero.get_stat('move_range')[0]:
                     path = bfs_path((start_gx, start_gy), (end_gx, end_gy))
                     for sx, sy in path:
                         world_x = sx * TILE_SIZE + TILE_SIZE / 2

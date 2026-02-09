@@ -25,10 +25,12 @@ def apply_ability(source, target, effect, eff_manager=None):
         if target_obj:
             pending_buffs.append((target_obj, stat, val, dur))
 
-    context = {'hero': s_data, 'target': t_data, 'd4': random.randint(1, 4), 'buff': buff_func}
+    context = {'hero': s_data, 'target': t_data, 'buff': buff_func, 'd4': random.randint(1, 4),
+               'd6': random.randint(1,6), 'd10': random.randint(1, 10), 'd20': random.randint(1, 20)}
     try:
         for cmd in effect_script.split(';'):
-            if cmd.strip(): exec(cmd.strip(), {}, context)
+            if cmd.strip():
+                exec(cmd.strip(), {}, context)
     except Exception as e:
         print(f"Ошибка применения эффекта: {e}")
         source['moves_left'] += 1  # если произошла ошибка, то возвращаем ход
@@ -36,10 +38,9 @@ def apply_ability(source, target, effect, eff_manager=None):
 
 
     for key in target.stats_dict.keys():
-        target.stats_dict[key] = context['target'][key] - target.get_stat(key)[1]
+         target.stats_dict[key] = context['target'][key] - target.get_stat(key)[1]
     for key in source.stats_dict.keys():
         source.stats_dict[key] = context['hero'][key] - source.get_stat(key)[1]
-
     for (obj, stat, val, dur) in pending_buffs:
         obj.add_effect(stat, val, dur)
     if eff_manager:

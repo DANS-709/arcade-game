@@ -23,8 +23,6 @@ ENEMY_MOVING = 2
 EXTEND_PARAMS = {
     'max_hp': 'max_hp',
     'hp': 'max_hp',
-    'max_mana': '100',
-    'mana': 'max_mana',
     'moves_count': '3',
     'moves_left': 'moves_count',
     'view_range': '4',
@@ -38,15 +36,15 @@ ITEMS_DB = [{
         "price": 175,
         "stats": {},
         "abilities": [
-            {"name": "Удар эфесом", "effect": "target['hp'] -= 8; buff('target', 'max_hp', -2, 3)",
-             "description": "Наносит 8 урона и снижает защиту."}
+            {"name": "Удар эфесом", "effect": "target['hp'] -= 8; buff('target', 'max_hp', -5, 3)",
+             "description": "Наносит 8 урона и снижает максимальное количество здоровья жертвы."}
         ]
     },
     {
         "name": "Деревянный щит",
         "image": "images/shield.png",
         "price": 75,
-        "stats": {"armor": 3, "max_hp": 20},
+        "stats": {"hp": 20, "max_hp": 20},
         "abilities": []
     },{
         "name": "Зелье здоровья",
@@ -54,19 +52,24 @@ ITEMS_DB = [{
         "price": 120,
         "stats": {},
         "abilities": [
-            {"name": "Выпить", "effect": "hero['hp'] += 5", "description": "Восстанавливает HP."}
+            {"name": "Выпить", "effect": "hero['hp'] += 7", "description": "Восстанавливает HP."}
         ]
     }
 ]
 
 NPC_DB = [
     {
-        "name": "Sir Aldric",
+        "name": "Aldric",
         "image": "images/barmen.png",
         "phrases": [
             "Поможешь нам с чудищами?",
             "Дороги стали опасны...",
             "Нужен кто-то смелый для работы."
+        ],
+        "final_phrases": [
+        "Ты доказал, что сможешь сразиться с ним...",
+        "Пришло время положить конец этому злу.",
+        "Он ждёт тебя. Сразись с ним."
         ],
         "quests": [
             {
@@ -87,12 +90,50 @@ NPC_DB = [
     }
 ]
 
+FINAL_RETURN_QUEST = {
+    "type": "return_to_bar",
+    "target": 1,
+    "reward_coins": 0,
+    "reward_rep": 0,
+    "text": "Вернись в бар. Там тебя ждёт решающая битва."
+}
+
+FINAL_FIGHT_QUEST = {
+    "type": "fight with boss",
+    "target": 1,
+    "reward_coins": 0,
+    "reward_rep": 0,
+    "text": "Босс призван! найди и уничтожь его."
+}
+
+
+BOSS_VAMPIRE = {"name": "Лорд Дракулас",
+    "race": ["vampire","hero['move_range'] = 6"],
+    "class": ["boss", "hero['attack_range'] = 2"],
+    "stats": {"dexterity": 12, "strength": 5, "intelligence": 6, "charisma": 2},
+    "level": 1,
+    "hp": 1,  # в игре поменяем на сумму хп всех героев * 2
+    "abilities": [
+        {"name": "Кровавый укус",
+         "effect": "target['hp'] -= hero['dexterity'] - target['strength'];hero['hp'] += 5;buff('hero', 'max_hp' 2, 2)",
+         "description": "Кусает противника"},
+        {"name": "Облако летучих мышей",
+         "effect": "buff('target', 'hp', -10, 1);buff('target', 'max_hp', -6, 4)",
+         "description": "Атакует противника стаей летучих мышей, уменьшая его максимальный запас здоровья"},
+        {"name": "Тёмное проклятие",
+        "effect": "target['hp'] -= hero['intelligence'] + hero['charisma'];buff('target', 'move_range', -2, 2)",
+        "description": "Проклинает врага, замедляя его"
+        },
+    ],
+    "image_b64": ""
+}
+
 
 GUARD_JSON = {
     "name": "guard",
     "race": ["ancient","hero['move_range'] = 5"],
     "class": ["protector", "buff('hero', 'hp', 3, 3)"],
-    "stats": {"dex": 2, "str": 7, "int": 6, "cha": -3},
+    "stats": {"dexterity": 2, "strength": 7, "intelligence": 6, "charisma": -3},
     "level": 1,
     "hp": 12,
     "abilities": [
@@ -107,11 +148,11 @@ GUARD_JSON = {
 ENEMY_JSON = {"name": "spooky scary sceleton",
     "race": ["sceleton","buff('hero', 'move_range', -1, 2)"],
     "class": ["warrior","buff('hero', 'hp', -3, 2)"],
-    "stats": {"dex": -2, "str": 1, "int": 2, "cha": -3},
+    "stats": {"dexterity": -2, "strength": 1, "intelligence": 2, "charisma": -3},
     "level": 1,
     "hp": 10,
     "abilities": [
-        {"name": "удар мечом", "effect": "target['hp'] -= 4 + hero['dex'] + hero['str']",
+        {"name": "удар мечом", "effect": "target['hp'] -= 4 + hero['dexterity'] + hero['strength']",
          "description": "Наносит рубящий удар мечом по врагу."}
     ],
     "image_b64": "" } # Пусто, загрузится дефолтная
