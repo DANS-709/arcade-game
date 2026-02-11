@@ -105,7 +105,7 @@ def load_characters_from_zip():
 
     # Открываем диалоговое окно выбора файла
     file_path = filedialog.askopenfilename(
-        filetypes=[("ZIP files", "*.zip")]
+        filetypes=[("ZIP files", "*.zip")], title="Выберите zip-файл с персонажами"
     )
 
     if not file_path:

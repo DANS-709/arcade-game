@@ -36,6 +36,7 @@ def init_db():
             effects_json TEXT,
             abilities_json TEXT,
             is_guardian INTEGER,
+            is_boss INTEGER,
             image_path TEXT,
             map_id INTEGER,
             FOREIGN KEY (map_id) REFERENCES game_state (id) ON DELETE CASCADE
@@ -121,12 +122,12 @@ def save_game_state(world, heroes, enemies, lairs):
     for entity in all_entities:
         cursor.execute('''
             INSERT INTO entities (name, role, x, y, stats_json, effects_json, abilities_json,
-             is_guardian, image_path, map_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_guardian, is_boss, image_path, map_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (entity.name, entity.role, entity.center_x, entity.center_y,
               json.dumps(entity.stats_dict), json.dumps(entity.active_effects),
               json.dumps(entity.abilities), 1 if getattr(entity, 'is_guardian', False) else 0,
-              entity.image_path, save_id))
+              1 if getattr(entity, 'is_boss', False) else 0, entity.image_path, save_id))
         entity_db_id = cursor.lastrowid
         for item in getattr(entity, 'inventory', []):
             # 1. Добавляем предмет в справочник, если его там нет (по имени)
@@ -182,8 +183,8 @@ def load_game_state(save_id):
     world['rep'] = row[2]
     world['quest'] = json.loads(row[3])
 
-    cursor.execute('''SELECT name, role, x, y, stats_json, effects_json, abilities_json, is_guardian, image_path
-     FROM entities WHERE map_id = ?''', (save_id,))
+    cursor.execute('''SELECT name, role, x, y, stats_json, effects_json, abilities_json,
+     is_guardian, is_boss, image_path FROM entities WHERE map_id = ?''', (save_id,))
     entities_rows = cursor.fetchall()
     entities_data = []
 
@@ -204,8 +205,8 @@ def load_game_state(save_id):
         entities_data.append({
             'name': r[0], 'role': r[1], 'x': r[2], 'y': r[3],
             'stats': json.loads(r[4]), 'effects': json.loads(r[5]),
-            'abilities': json.loads(r[6]), 'is_guardian': bool(r[7]),
-            'image_path': r[8],
+            'abilities': json.loads(r[6]), 'is_guardian': bool(r[7]), 'is_boss': bool(r[8]),
+            'image_path': r[9],
             'inventory': items_data  # Добавляем список предметов в данные сущности
         })
 

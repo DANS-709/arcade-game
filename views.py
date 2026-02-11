@@ -740,6 +740,12 @@ class GameView(arcade.View):
                     enemy.abilities = ent_data['abilities']
                     enemy.inventory = ent_data['inventory']
                     enemy.is_guardian = is_guardian
+                    enemy.is_boss = ent_data['is_boss']
+                    if enemy.is_boss:
+                        self.boss_entity = enemy
+                        self.boss_spawned = True
+                        self.active_quest = FINAL_FIGHT_QUEST
+                        self.active_quest['progress'] = 0
                     enemy.center_x, enemy.center_y = ent_data['x'], ent_data['y']
                     self.entity_list.append(enemy)
                     self.enemy_list.append(enemy)
@@ -1035,7 +1041,7 @@ class GameView(arcade.View):
         # Смерть
         for entity in self.entity_list:
             if entity.get_stat('hp')[0] <= 0:
-                if entity == self.boss_entity:
+                if entity == self.boss_entity or getattr(entity, 'is_boss', False):
                     print("Босс повержен. Игра окончена.")
                     arcade.stop_sound(self.background_music_player)
                     self.window.show_view(GameEndView(win=True))
@@ -1122,6 +1128,7 @@ class GameView(arcade.View):
 
         boss = Entity("images/vampire.png", "enemy", json_data=boss_data)
         boss.is_guardian = False
+        boss.is_boss = True
 
         # Ставим в рандомный лес
         boss.position = random.choice(self.forests).position
