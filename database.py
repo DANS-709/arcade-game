@@ -106,7 +106,6 @@ def save_game_state(world, heroes, enemies, lairs):
         # Очищаем старые данные сущностей и логов для этого ID
         cursor.execute('DELETE FROM entities WHERE map_id = ?', (save_id,))
         cursor.execute('DELETE FROM lairs WHERE map_id = ?', (save_id,))
-        cursor.execute('DELETE FROM inventory WHERE map_id = ?', (save_id,))
         # Обновляем сид (на всякий случай)
         cursor.execute('UPDATE game_state SET map_seed = ? WHERE id = ?', (world.get('seed'), save_id))
     else:
